@@ -85,7 +85,12 @@ const DEFAULT_IMAGE_PARAMS: ImageParams = {
   responseFormat: "url"
 };
 
-const newId = () => crypto.randomUUID();
+const newId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 function createConversation(): Conversation {
   const now = Date.now();
