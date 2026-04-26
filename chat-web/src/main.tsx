@@ -71,14 +71,17 @@ const MODELS = [
 
 const IMAGE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512", "1792x1024", "1024x1792"];
 const IMAGE_MODELS = [
-  { label: "image1", value: "image1" },
-  { label: "image1.5", value: "image1.5" },
-  { label: "image2", value: "image2" }
+  { label: "GPT Image 2", value: "gpt-image-2" },
+  { label: "GPT Image 1.5", value: "gpt-image-1.5" },
+  { label: "GPT Image 1", value: "gpt-image-1" },
+  { label: "GPT Image 1 Mini", value: "gpt-image-1-mini" },
+  { label: "DALL-E 3", value: "dall-e-3" },
+  { label: "DALL-E 2", value: "dall-e-2" }
 ];
 const IMAGE_QUALITIES: ImageQuality[] = ["standard", "hd", "low", "medium", "high"];
 const IMAGE_FORMATS: ImageResponseFormat[] = ["url", "b64_json"];
 const DEFAULT_IMAGE_PARAMS: ImageParams = {
-  model: "image1",
+  model: "gpt-image-2",
   size: "1024x1024",
   n: 1,
   quality: "standard",
