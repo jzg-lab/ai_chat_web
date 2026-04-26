@@ -220,7 +220,9 @@ function App() {
   const [notice, setNotice] = React.useState("");
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
+  const messagesRef = React.useRef<HTMLElement | null>(null);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = React.useRef(true);
 
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
 
@@ -247,8 +249,17 @@ function App() {
   }, [theme]);
 
   React.useEffect(() => {
-    scrollRef.current?.scrollIntoView({ block: "end" });
+    if (shouldStickToBottomRef.current) {
+      scrollRef.current?.scrollIntoView({ block: "end" });
+    }
   }, [active?.messages, busy]);
+
+  function updateStickToBottom() {
+    const node = messagesRef.current;
+    if (!node) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    shouldStickToBottomRef.current = distance < 96;
+  }
 
   function updateConversation(id: string, updater: (conversation: Conversation) => Conversation) {
     setConversations((items) =>
@@ -585,7 +596,7 @@ function App() {
           )}
         </header>
 
-        <section className="messages" aria-live="polite">
+        <section className="messages" aria-live="polite" ref={messagesRef} onScroll={updateStickToBottom}>
           {active.messages.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">

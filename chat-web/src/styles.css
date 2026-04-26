@@ -447,7 +447,18 @@ button {
   padding: 18px 0;
 }
 
+.message.user {
+  grid-template-columns: minmax(0, 1fr) 36px;
+}
+
+.message.user .avatar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .message.user .message-body {
+  grid-column: 1;
+  grid-row: 1;
   background: var(--accent-soft);
   justify-self: end;
   max-width: min(760px, 100%);
@@ -807,6 +818,10 @@ button {
   .message {
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 10px;
+  }
+
+  .message.user {
+    grid-template-columns: minmax(0, 1fr) 32px;
   }
 
   .avatar {
