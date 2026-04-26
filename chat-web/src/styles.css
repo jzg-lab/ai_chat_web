@@ -296,13 +296,14 @@ button {
 }
 
 .topbar {
-  height: 78px;
-  flex: 0 0 78px;
+  min-height: 78px;
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--muted-border);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 0 24px;
+  padding: 14px 24px;
   background: var(--surface);
   backdrop-filter: blur(18px);
 }
@@ -314,6 +315,21 @@ button {
 .topbar-title {
   min-width: 0;
   margin-right: auto;
+}
+
+.topbar-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-image-params {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .topbar-title strong {
@@ -360,23 +376,20 @@ button {
   appearance: none;
 }
 
+.topbar-image-params .select-field select {
+  min-width: 118px;
+  max-width: 168px;
+}
+
+.topbar-image-params .select-field:first-child select {
+  min-width: 158px;
+}
+
 .key-state {
   height: 42px;
   padding: 0 14px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-weight: 700;
-}
-
-.image-state {
-  height: 42px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 10px;
-  padding: 0 14px;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
   font-weight: 700;
 }
 
@@ -597,14 +610,6 @@ button {
   background: var(--surface-2);
 }
 
-.image-params {
-  display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) repeat(3, minmax(104px, 1fr));
-  gap: 10px;
-  padding: 8px 0 10px;
-}
-
-.image-params label,
 .modal label {
   min-width: 0;
   display: grid;
@@ -612,12 +617,6 @@ button {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
-}
-
-.image-params select,
-.image-params input {
-  width: 100%;
-  padding-right: 10px;
 }
 
 .composer {
@@ -744,9 +743,18 @@ button {
   background: rgba(0, 0, 0, 0.34);
 }
 
-@media (max-width: 900px) {
-  .image-params {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 1100px) {
+  .topbar-title {
+    flex: 1 1 220px;
+  }
+
+  .topbar-controls {
+    order: 2;
+    flex: 1 1 100%;
+  }
+
+  .topbar-image-params {
+    justify-content: flex-start;
   }
 }
 
@@ -772,14 +780,12 @@ button {
   }
 
   .topbar {
-    height: 66px;
-    flex-basis: 66px;
+    min-height: 66px;
     padding: 0 10px;
   }
 
   .topbar-title span,
-  .key-state span,
-  .image-state span {
+  .key-state span {
     display: none;
   }
 
@@ -789,6 +795,13 @@ button {
 
   .select-field select {
     min-width: 126px;
+  }
+
+  .topbar-image-params .select-field,
+  .topbar-image-params .select-field select {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
   }
 
   .message {
@@ -807,10 +820,6 @@ button {
 
   .theme-button span {
     display: none;
-  }
-
-  .image-params {
-    grid-template-columns: 1fr;
   }
 
   .image-grid.count-2,

@@ -509,23 +509,71 @@ function App() {
             <strong>{mode === "chat" ? "智能对话" : "图像生成"}</strong>
             <span>{mode === "chat" ? "实时流式输出" : "OpenAI 风格图片接口"}</span>
           </div>
-          {mode === "chat" ? (
-            <label className="select-field compact">
-              <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型">
-                {MODELS.map((item) => (
-                  <option value={item.value} key={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={16} />
-            </label>
-          ) : (
-            <div className="image-state">
-              <Image size={16} />
-              <span>生图参数已启用</span>
-            </div>
-          )}
+          <div className="topbar-controls">
+            {mode === "chat" ? (
+              <label className="select-field compact">
+                <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型">
+                  {MODELS.map((item) => (
+                    <option value={item.value} key={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </label>
+            ) : (
+              <div className="topbar-image-params">
+                <label className="select-field compact">
+                  <select value={imageParams.model} onChange={(event) => updateImageParam("model", event.target.value)} aria-label="选择生图模型">
+                    {IMAGE_MODELS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select value={imageParams.size} onChange={(event) => updateImageParam("size", event.target.value)} aria-label="选择图片尺寸">
+                    {IMAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select
+                    value={imageParams.quality}
+                    onChange={(event) => updateImageParam("quality", event.target.value as ImageQuality)}
+                    aria-label="选择图片质量"
+                  >
+                    {IMAGE_QUALITIES.map((quality) => (
+                      <option key={quality} value={quality}>
+                        {quality}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select
+                    value={imageParams.responseFormat}
+                    onChange={(event) => updateImageParam("responseFormat", event.target.value as ImageResponseFormat)}
+                    aria-label="选择图片返回格式"
+                  >
+                    {IMAGE_FORMATS.map((format) => (
+                      <option key={format} value={format}>
+                        {format}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+              </div>
+            )}
+          </div>
           <button className="key-state" onClick={() => setShowSettings(true)}>
             {apiKey ? <Check size={16} /> : <KeyRound size={16} />}
             <span>{apiKey ? "Key 已保存" : "填写 Key"}</span>
@@ -591,57 +639,6 @@ function App() {
                 <span>{theme === "auto" ? "自动" : theme === "light" ? "浅色" : "深色"}</span>
               </button>
             </div>
-
-            {mode === "image" && (
-              <div className="image-params">
-                <label>
-                  <span>模型</span>
-                  <select value={imageParams.model} onChange={(event) => updateImageParam("model", event.target.value)}>
-                    {IMAGE_MODELS.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>尺寸</span>
-                  <select value={imageParams.size} onChange={(event) => updateImageParam("size", event.target.value)}>
-                    {IMAGE_SIZES.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>质量</span>
-                  <select
-                    value={imageParams.quality}
-                    onChange={(event) => updateImageParam("quality", event.target.value as ImageQuality)}
-                  >
-                    {IMAGE_QUALITIES.map((quality) => (
-                      <option key={quality} value={quality}>
-                        {quality}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>格式</span>
-                  <select
-                    value={imageParams.responseFormat}
-                    onChange={(event) => updateImageParam("responseFormat", event.target.value as ImageResponseFormat)}
-                  >
-                    {IMAGE_FORMATS.map((format) => (
-                      <option key={format} value={format}>
-                        {format}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
 
             <div className="composer">
               <textarea
