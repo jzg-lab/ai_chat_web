@@ -1,66 +1,41 @@
 # 词元.fast Chat 部署说明
 
-## 1. 环境要求
+## 1. 推荐架构
 
-- Node.js 24 或更高版本
-- npm
-- Docker 与 Docker Compose（推荐生产部署使用）
-- 一个可访问的 Sub2API/OpenAI 兼容接口地址
-
-## 2. 本地运行
-
-安装依赖：
-
-```bash
-npm install
-```
-
-启动后端代理：
-
-```bash
-npm run dev:server
-```
-
-另开一个终端启动前端：
-
-```bash
-npm run dev
-```
-
-打开：
+生产环境建议这样走：
 
 ```text
-http://localhost:5173/chat/
+浏览器 -> Cloudflare / 域名 -> Nginx -> ciyuan-chat
+ciyuan-chat -> 同机 Sub2API -> 上游模型服务
 ```
 
-开发环境中，Vite 会把 `/chat-api` 代理到 `http://localhost:3000`。
+也就是说，用户访问入口可以走 Cloudflare，但 `ciyuan-chat` 调用 Sub2API 时默认走服务器本机地址，避免在同一台服务器上绕公网域名和 Cloudflare。
 
-## 3. 生产构建检查
+## 2. 环境要求
 
-部署前建议先执行：
+- Docker 与 Docker Compose
+- 已运行的 Sub2API 服务
+- Sub2API 在宿主机上能通过 `http://127.0.0.1` 访问
 
-```bash
-npm run check
-```
-
-这个命令会依次执行：
-
-- 前端 TypeScript 类型检查
-- 前端生产构建
-- 后端 Node 语法检查
-
-## 4. Docker 部署
-
-编辑 `docker-compose.yml` 中的环境变量：
+当前 `docker-compose.yml` 已默认配置：
 
 ```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
 environment:
-  SUB2API_BASE_URL: https://ciyuan.fast
-  CHAT_COMPLETIONS_ENDPOINT: /v1/chat/completions
-  IMAGE_ENDPOINT: /v1/images/generations
-  IMAGE_MODEL: ""
-  PORT: 3000
-  UPSTREAM_TIMEOUT_MS: 600000
+  SUB2API_BASE_URL: http://host.docker.internal
+```
+
+如果你的 Sub2API 不在同一台服务器，请把 `SUB2API_BASE_URL` 改成实际可访问的内网或公网地址。
+
+## 3. 服务器部署
+
+拉取代码：
+
+```bash
+cd /opt
+git clone https://github.com/jzg-lab/ai_chat_web.git
+cd ai_chat_web
 ```
 
 启动：
@@ -69,10 +44,12 @@ environment:
 docker compose up -d --build
 ```
 
-查看状态：
+更新部署：
 
 ```bash
-docker compose ps
+cd /opt/ai_chat_web
+git pull
+docker compose up -d --build
 ```
 
 查看日志：
@@ -93,42 +70,87 @@ curl http://127.0.0.1:3000/chat-api/health
 {"ok":true}
 ```
 
-访问页面：
+## 4. 验证 Sub2API 连通性
+
+在宿主机上测试：
+
+```bash
+curl -i http://127.0.0.1/v1/models
+```
+
+在 chat 容器里测试：
+
+```bash
+docker compose exec ciyuan-chat wget -S -O- http://host.docker.internal/v1/models
+```
+
+如果宿主机能通、容器不通，检查 Docker 版本是否支持 `host-gateway`。如果 Sub2API 不在宿主机 80 端口，请修改 `SUB2API_BASE_URL`。
+
+## 5. 临时直连访问
+
+用于测试时，可以直接访问：
 
 ```text
 http://服务器IP:3000/chat/
 ```
 
-## 5. Nginx 反向代理
+这只是临时测试入口。生产环境更推荐走域名和 Nginx 的 80/443。
 
-如果对外域名是 `https://ciyuan.fast`，可以把 `deploy/nginx-ciyuan-chat.conf` 里的 `location` 片段放进现有 server 块。
+## 6. Nginx 反向代理
 
-当 Nginx 运行在 Docker 宿主机上，并且容器发布了 `3000:3000`：
-
-```nginx
-proxy_pass http://127.0.0.1:3000;
-```
-
-当 Nginx 和应用在同一个 Docker Compose 网络里：
+把下面配置放进你的域名 server 块中：
 
 ```nginx
-proxy_pass http://ciyuan-chat:3000;
+location /chat {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /chat/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /chat-api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
 
-应用需要代理这些路径：
+检查并重载 Nginx：
 
-- `/chat`
-- `/chat/`
-- `/chat-api/`
+```bash
+nginx -t && systemctl reload nginx
+```
 
-`/chat-api/` 已关闭 Nginx buffering，便于聊天接口保持流式输出。
+访问：
 
-## 6. 页面配置
+```text
+https://你的域名/chat/
+```
+
+## 7. 页面配置
 
 Sub2API 后台自定义菜单 URL 填：
 
 ```text
-https://ciyuan.fast/chat
+https://你的域名/chat/
 ```
 
 主题支持 URL 参数：
@@ -139,28 +161,55 @@ https://ciyuan.fast/chat
 /chat/?theme=dark
 ```
 
-## 7. API Key 说明
+## 8. 本地开发
 
-用户 API Key 只保存在浏览器 `localStorage`，后端代理只做转发，不保存 Key，不记录请求体或响应体。
-
-生产环境建议启用 HTTPS。当前服务端已启用基础 CSP，并允许图片返回 `https:`、`data:`、`blob:` 地址。
-
-## 8. 常见维护命令
-
-更新部署：
+安装依赖：
 
 ```bash
-git pull
-docker compose up -d --build
+npm install
 ```
 
-重启服务：
+启动后端代理：
+
+```bash
+npm run dev:server
+```
+
+另开终端启动前端：
+
+```bash
+npm run dev
+```
+
+打开：
+
+```text
+http://localhost:5173/chat/
+```
+
+开发环境中，Vite 会把 `/chat-api` 代理到 `http://localhost:3000`。
+
+## 9. 部署前检查
+
+```bash
+npm run check
+```
+
+这个命令会执行：
+
+- 前端 TypeScript 类型检查
+- 前端生产构建
+- 后端 Node 语法检查
+
+## 10. 常见维护命令
+
+重启：
 
 ```bash
 docker compose restart ciyuan-chat
 ```
 
-停止服务：
+停止：
 
 ```bash
 docker compose down
