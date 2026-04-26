@@ -1,0 +1,17 @@
+services:
+  ciyuan-chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ciyuan-chat
+    restart: unless-stopped
+    environment:
+      SUB2API_BASE_URL: https://ciyuan.fast
+      CHAT_COMPLETIONS_ENDPOINT: /v1/chat/completions
+      IMAGE_ENDPOINT: /v1/images/generations
+      IMAGE_MODEL: ""
+      PORT: 3000
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"

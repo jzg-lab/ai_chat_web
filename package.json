@@ -1,0 +1,18 @@
+{
+  "name": "ciyuan-chat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --workspace chat-web run dev",
+    "dev:server": "npm --workspace chat-server run dev",
+    "build": "npm --workspace chat-web run build",
+    "start": "npm --workspace chat-server run start",
+    "typecheck": "npm --workspace chat-web run typecheck",
+    "check": "npm --workspace chat-web run typecheck && npm --workspace chat-web run build && npm --workspace chat-server run check"
+  },
+  "workspaces": [
+    "chat-web",
+    "chat-server"
+  ]
+}
