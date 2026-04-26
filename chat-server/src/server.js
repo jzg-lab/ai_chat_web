@@ -32,7 +32,8 @@ app.use(
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        styleSrcAttr: ["'unsafe-inline'"]
+        styleSrcAttr: ["'unsafe-inline'"],
+        upgradeInsecureRequests: null
       }
     },
     crossOriginEmbedderPolicy: false
