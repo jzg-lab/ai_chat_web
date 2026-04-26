@@ -13,6 +13,9 @@ const chatEndpoint = process.env.CHAT_COMPLETIONS_ENDPOINT || "/v1/chat/completi
 const imageEndpoint = process.env.IMAGE_ENDPOINT || "/v1/images/generations";
 const imageModel = process.env.IMAGE_MODEL || "";
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 600000);
+const frameAncestors = (process.env.FRAME_ANCESTORS || "'self' https://ciyuan.fast https://*.ciyuan.fast")
+  .split(/\s+/)
+  .filter(Boolean);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.resolve(__dirname, "../../chat-web/dist");
@@ -27,7 +30,7 @@ app.use(
         connectSrc: ["'self'"],
         fontSrc: ["'self'", "data:"],
         formAction: ["'self'"],
-        frameAncestors: ["'self'"],
+        frameAncestors,
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
@@ -36,7 +39,8 @@ app.use(
         upgradeInsecureRequests: null
       }
     },
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    xFrameOptions: false
   })
 );
 app.use(

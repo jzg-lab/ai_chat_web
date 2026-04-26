@@ -24,6 +24,7 @@ extra_hosts:
   - "host.docker.internal:host-gateway"
 environment:
   SUB2API_BASE_URL: http://host.docker.internal
+  FRAME_ANCESTORS: "'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
 如果你的 Sub2API 不在同一台服务器，请把 `SUB2API_BASE_URL` 改成实际可访问的内网或公网地址。
@@ -153,6 +154,12 @@ Sub2API 后台自定义菜单 URL 填：
 https://你的域名/chat/
 ```
 
+如果使用 `chat.ciyuan.fast` 子域名，并把它嵌入 `ciyuan.fast` 后台 iframe，`FRAME_ANCESTORS` 需要允许主域页面作为 iframe 父页面。默认配置已经允许：
+
+```text
+'self' https://ciyuan.fast https://*.ciyuan.fast
+```
+
 主题支持 URL 参数：
 
 ```text
@@ -220,4 +227,3 @@ docker compose down
 ```bash
 docker image prune
 ```
-
