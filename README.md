@@ -29,9 +29,14 @@ docker compose up -d --build
 默认服务监听容器内 `3000`：
 
 ```env
-SUB2API_BASE_URL=https://ciyuan.fast
-CHAT_COMPLETIONS_ENDPOINT=/v1/chat/completions
-IMAGE_ENDPOINT=/v1/images/generations
+API_BASE_URL=https://ciyuan.fast/v1
+IMAGE_API_BASE_URL=https://imgapi.ciyuan.fast/v1
+MODELS_ENDPOINT=/models
+CHAT_COMPLETIONS_ENDPOINT=/chat/completions
+RESPONSES_ENDPOINT=/responses
+IMAGE_GENERATIONS_ENDPOINT=/images/generations
+IMAGE_EDITS_ENDPOINT=/images/edits
+IMAGE_VARIATIONS_ENDPOINT=/images/variations
 IMAGE_MODEL=
 PORT=3000
 ```
@@ -46,8 +51,12 @@ https://ciyuan.fast/chat
 
 ## 接口
 
-- `POST /chat-api/chat/completions` 转发到 `${SUB2API_BASE_URL}${CHAT_COMPLETIONS_ENDPOINT}`
-- `POST /chat-api/images/generations` 转发到 `${SUB2API_BASE_URL}${IMAGE_ENDPOINT}`
+- `GET /chat-api/models` 转发到 `${API_BASE_URL}${MODELS_ENDPOINT}`
+- `POST /chat-api/chat/completions` 转发到 `${API_BASE_URL}${CHAT_COMPLETIONS_ENDPOINT}`
+- `POST /chat-api/responses` 转发到 `${API_BASE_URL}${RESPONSES_ENDPOINT}`
+- `POST /chat-api/images/generations` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_GENERATIONS_ENDPOINT}`
+- `POST /chat-api/images/edits` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_EDITS_ENDPOINT}`
+- `POST /chat-api/images/variations` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_VARIATIONS_ENDPOINT}`
 - `GET /chat-api/health` 健康检查
 
 前端请求代理时带：

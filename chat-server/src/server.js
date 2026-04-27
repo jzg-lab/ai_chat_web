@@ -8,9 +8,16 @@ import path from "node:path";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const baseUrl = (process.env.SUB2API_BASE_URL || "https://ciyuan.fast").replace(/\/+$/, "");
-const chatEndpoint = process.env.CHAT_COMPLETIONS_ENDPOINT || "/v1/chat/completions";
-const imageEndpoint = process.env.IMAGE_ENDPOINT || "/v1/images/generations";
+const legacyApiBaseUrl = process.env.SUB2API_BASE_URL;
+const apiBaseUrl = (process.env.API_BASE_URL || legacyApiBaseUrl || "https://ciyuan.fast/v1").replace(/\/+$/, "");
+const imageApiBaseUrl = (process.env.IMAGE_API_BASE_URL || "https://imgapi.ciyuan.fast/v1").replace(/\/+$/, "");
+const endpointPrefix = legacyApiBaseUrl && !process.env.API_BASE_URL ? "/v1" : "";
+const chatEndpoint = process.env.CHAT_COMPLETIONS_ENDPOINT || `${endpointPrefix}/chat/completions`;
+const modelsEndpoint = process.env.MODELS_ENDPOINT || `${endpointPrefix}/models`;
+const responsesEndpoint = process.env.RESPONSES_ENDPOINT || `${endpointPrefix}/responses`;
+const imageGenerationEndpoint = process.env.IMAGE_ENDPOINT || process.env.IMAGE_GENERATIONS_ENDPOINT || "/images/generations";
+const imageEditsEndpoint = process.env.IMAGE_EDITS_ENDPOINT || "/images/edits";
+const imageVariationsEndpoint = process.env.IMAGE_VARIATIONS_ENDPOINT || "/images/variations";
 const imageModel = process.env.IMAGE_MODEL || "";
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 600000);
 const frameAncestors = (process.env.FRAME_ANCESTORS || "'self' https://ciyuan.fast https://*.ciyuan.fast")
@@ -75,7 +82,7 @@ function getAuthorization(req) {
   return authorization;
 }
 
-async function forwardJson(req, res, endpoint, body) {
+async function forwardUpstream(req, res, origin, endpoint, { method = "POST", body } = {}) {
   const authorization = getAuthorization(req);
   if (!authorization) {
     res.status(401).json({ error: { message: "请先填写 API Key。" } });
@@ -94,13 +101,13 @@ async function forwardJson(req, res, endpoint, body) {
   });
 
   try {
-    upstream = await fetch(joinUrl(baseUrl, endpoint), {
-      method: "POST",
+    upstream = await fetch(joinUrl(origin, endpoint), {
+      method,
       headers: {
-        "Content-Type": "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         Authorization: authorization
       },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal
     });
   } catch {
@@ -140,16 +147,40 @@ async function forwardJson(req, res, endpoint, body) {
   }
 }
 
-app.post("/chat-api/chat/completions", async (req, res) => {
-  await forwardJson(req, res, chatEndpoint, req.body);
+async function forwardJson(req, res, origin, endpoint, body) {
+  await forwardUpstream(req, res, origin, endpoint, { method: "POST", body });
+}
+
+app.get("/chat-api/models", async (req, res) => {
+  await forwardUpstream(req, res, apiBaseUrl, modelsEndpoint, { method: "GET" });
 });
 
-app.post("/chat-api/images/generations", async (req, res) => {
+app.post("/chat-api/chat/completions", async (req, res) => {
+  await forwardJson(req, res, apiBaseUrl, chatEndpoint, req.body);
+});
+
+app.post("/chat-api/responses", async (req, res) => {
+  await forwardJson(req, res, apiBaseUrl, responsesEndpoint, req.body);
+});
+
+async function forwardImage(req, res, endpoint) {
   const body = { ...req.body };
   if (imageModel && !body.model) {
     body.model = imageModel;
   }
-  await forwardJson(req, res, imageEndpoint, body);
+  await forwardJson(req, res, imageApiBaseUrl, endpoint, body);
+}
+
+app.post("/chat-api/images/generations", async (req, res) => {
+  await forwardImage(req, res, imageGenerationEndpoint);
+});
+
+app.post("/chat-api/images/edits", async (req, res) => {
+  await forwardImage(req, res, imageEditsEndpoint);
+});
+
+app.post("/chat-api/images/variations", async (req, res) => {
+  await forwardImage(req, res, imageVariationsEndpoint);
 });
 
 app.get("/chat-api/health", (_req, res) => {

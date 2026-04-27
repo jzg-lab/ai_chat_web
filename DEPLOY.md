@@ -23,11 +23,12 @@ ciyuan-chat -> 同机 Sub2API -> 上游模型服务
 extra_hosts:
   - "host.docker.internal:host-gateway"
 environment:
-  SUB2API_BASE_URL: http://host.docker.internal
+  API_BASE_URL: http://host.docker.internal/v1
+  IMAGE_API_BASE_URL: https://imgapi.ciyuan.fast/v1
   FRAME_ANCESTORS: "'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
-如果你的 Sub2API 不在同一台服务器，请把 `SUB2API_BASE_URL` 改成实际可访问的内网或公网地址。
+如果你的 Sub2API 不在同一台服务器，请把 `API_BASE_URL` 改成实际可访问的内网或公网地址。图片接口会通过 `IMAGE_API_BASE_URL` 单独转发，不再复用普通 API 地址。
 
 ## 3. 服务器部署
 
@@ -85,7 +86,7 @@ curl -i http://127.0.0.1/v1/models
 docker compose exec ciyuan-chat wget -S -O- http://host.docker.internal/v1/models
 ```
 
-如果宿主机能通、容器不通，检查 Docker 版本是否支持 `host-gateway`。如果 Sub2API 不在宿主机 80 端口，请修改 `SUB2API_BASE_URL`。
+如果宿主机能通、容器不通，检查 Docker 版本是否支持 `host-gateway`。如果 Sub2API 不在宿主机 80 端口，请修改 `API_BASE_URL`。
 
 ## 5. 临时直连访问
 
