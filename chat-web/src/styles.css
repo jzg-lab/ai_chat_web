@@ -321,6 +321,9 @@ button {
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .topbar-title strong {
@@ -565,14 +568,7 @@ button {
   box-shadow: var(--shadow);
 }
 
-.composer-toolbar {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.composer-image-params {
+.composer-params {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -582,18 +578,19 @@ button {
   scrollbar-width: thin;
 }
 
-.composer-image-params .select-field {
+.composer-params .select-field {
   flex: 0 0 auto;
 }
 
-.composer-image-params .select-field select {
+.composer-params .select-field select {
   min-width: 124px;
   height: 36px;
   border-radius: 9px;
   font-size: 13px;
 }
 
-.composer-image-params .select-field:first-child select {
+.composer-params .model-select select,
+.composer-params .select-field:first-child select {
   min-width: 164px;
 }
 
@@ -619,6 +616,10 @@ button {
   background: var(--shell);
   color: var(--accent-strong);
   box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+
+.topbar-mode-switch {
+  flex: 0 0 auto;
 }
 
 .theme-button {
@@ -790,15 +791,16 @@ button {
     min-height: 66px;
     gap: 8px;
     padding: 0 10px;
+    flex-wrap: nowrap;
   }
 
   .topbar-title {
-    flex: 1 1 68px;
+    display: none;
   }
 
-  .topbar-controls .select-field select {
-    min-width: 112px;
-    max-width: 136px;
+  .topbar-controls {
+    flex: 0 0 auto;
+    gap: 6px;
   }
 
   .topbar-title span,
@@ -828,18 +830,15 @@ button {
     height: 32px;
   }
 
-  .composer-toolbar {
-    align-items: stretch;
-  }
-
-  .composer-image-params {
+  .composer-params {
     margin: 0 -10px 8px;
     padding: 0 10px 8px;
     flex-wrap: nowrap;
   }
 
-  .composer-image-params .select-field select,
-  .composer-image-params .select-field:first-child select {
+  .composer-params .select-field select,
+  .composer-params .model-select select,
+  .composer-params .select-field:first-child select {
     min-width: 132px;
     max-width: 168px;
   }

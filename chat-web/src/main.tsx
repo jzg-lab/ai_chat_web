@@ -175,6 +175,10 @@ function errorSummary(status: number, payload: unknown) {
 
 async function readError(response: Response) {
   const text = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json") && /<\/?[a-z][\s\S]*>/i.test(text)) {
+    return errorSummary(response.status, response.statusText || "上游返回非 JSON 错误");
+  }
   try {
     return errorSummary(response.status, JSON.parse(text));
   } catch {
@@ -269,7 +273,7 @@ function App() {
   const [apiKey, setApiKey] = React.useState(() => localStorage.getItem(API_KEY_KEY) ?? "");
   const [draftKey, setDraftKey] = React.useState(apiKey);
   const [showSettings, setShowSettings] = React.useState(!apiKey);
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+  const [sidebarOpen, setSidebarOpen] = React.useState(() => window.matchMedia("(min-width: 761px)").matches);
   const [models, setModels] = React.useState<ChatModel[]>(FALLBACK_MODELS);
   const [modelsLoading, setModelsLoading] = React.useState(false);
   const [model, setModel] = React.useState(FALLBACK_MODELS[0].value);
@@ -332,9 +336,12 @@ function App() {
         setNotice("");
       } catch (error) {
         if (!alive || (error as Error).name === "AbortError") return;
+        const message = (error as Error).message || "";
+        const reason =
+          message === "Failed to fetch" ? "无法连接 /chat-api/models，请确认前端代理和后端服务已启动。" : message;
         setModels(FALLBACK_MODELS);
         setMode("chat");
-        setNotice(`模型列表读取失败，已使用默认 GPT 列表。${(error as Error).message || ""}`);
+        setNotice(`模型列表读取失败，已使用默认 GPT 列表。${reason}`);
       } finally {
         if (alive) setModelsLoading(false);
       }
@@ -597,6 +604,31 @@ function App() {
     setMode(nextMode);
   }
 
+  function renderModelSelect() {
+    return (
+      <label className="select-field compact model-select">
+        <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型" disabled={modelsLoading}>
+          {modelGroups.length > 1
+            ? modelGroups.map((group) => (
+                <optgroup key={group.family} label={group.label}>
+                  {group.models.map((item) => (
+                    <option value={item.value} key={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            : models.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {item.label}
+                </option>
+              ))}
+        </select>
+        <ChevronDown size={16} />
+      </label>
+    );
+  }
+
   return (
     <div className="app-shell" data-resolved-theme={resolvedTheme}>
       <aside className={`sidebar ${sidebarOpen ? "open" : "closed"}`}>
@@ -657,26 +689,22 @@ function App() {
             <span>{topbarSubtitle}</span>
           </div>
           <div className="topbar-controls">
-            <label className="select-field compact">
-              <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型" disabled={modelsLoading}>
-                {modelGroups.length > 1
-                  ? modelGroups.map((group) => (
-                      <optgroup key={group.family} label={group.label}>
-                        {group.models.map((item) => (
-                          <option value={item.value} key={item.value}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : models.map((item) => (
-                      <option value={item.value} key={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-              </select>
-              <ChevronDown size={16} />
-            </label>
+            <div className="mode-switch topbar-mode-switch" role="tablist" aria-label="模式">
+              <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")}>
+                <Bot size={16} />
+                <span>对话</span>
+              </button>
+              {canUseImages && (
+                <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")}>
+                  <Image size={16} />
+                  <span>生图</span>
+                </button>
+              )}
+            </div>
+            <button className="theme-button" onClick={() => setTheme(theme === "auto" ? "light" : theme === "light" ? "dark" : "auto")}>
+              {theme === "dark" ? <Moon size={16} /> : theme === "light" ? <Sun size={16} /> : <Sparkles size={16} />}
+              <span>{theme === "auto" ? "自动" : theme === "light" ? "浅色" : "深色"}</span>
+            </button>
           </div>
           <button className="key-state" onClick={() => setShowSettings(true)}>
             {apiKey ? <Check size={16} /> : <KeyRound size={16} />}
@@ -727,27 +755,10 @@ function App() {
         <footer className="composer-wrap">
           {notice && <div className="notice">{notice}</div>}
           <div className="composer-panel">
-            <div className="composer-toolbar">
-              <div className="mode-switch" role="tablist" aria-label="模式">
-                <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")}>
-                  <Bot size={16} />
-                  <span>对话</span>
-                </button>
-                {canUseImages && (
-                  <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")}>
-                    <Image size={16} />
-                    <span>生图</span>
-                  </button>
-                )}
-              </div>
-              <button className="theme-button" onClick={() => setTheme(theme === "auto" ? "light" : theme === "light" ? "dark" : "auto")}>
-                {theme === "dark" ? <Moon size={16} /> : theme === "light" ? <Sun size={16} /> : <Sparkles size={16} />}
-                <span>{theme === "auto" ? "自动" : theme === "light" ? "浅色" : "深色"}</span>
-              </button>
-            </div>
-
-            {mode === "image" && canUseImages && (
-              <div className="composer-image-params">
+            <div className="composer-params">
+              {renderModelSelect()}
+              {mode === "image" && canUseImages && (
+                <>
                 <label className="select-field compact">
                   <select value={imageParams.model} onChange={(event) => updateImageParam("model", event.target.value)} aria-label="选择生图模型">
                     {IMAGE_MODELS.map((item) => (
@@ -796,8 +807,9 @@ function App() {
                   </select>
                   <ChevronDown size={16} />
                 </label>
-              </div>
-            )}
+                </>
+              )}
+            </div>
 
             <div className="composer">
               <textarea
