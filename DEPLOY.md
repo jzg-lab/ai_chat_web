@@ -2,35 +2,87 @@
 
 ## 1. 推荐架构
 
-生产环境建议这样走：
+生产环境建议把用户入口和上游 API 分开：
 
 ```text
 浏览器 -> Cloudflare / 域名 -> Nginx -> ciyuan-chat
-ciyuan-chat -> 同机 Sub2API -> 上游模型服务
+ciyuan-chat -> Sub2API 服务器直连地址 -> 上游模型服务
+ciyuan-chat -> 生图直连服务器地址 -> 生图上游服务
 ```
 
-也就是说，用户访问入口可以走 Cloudflare，但 `ciyuan-chat` 调用 Sub2API 时默认走服务器本机地址，避免在同一台服务器上绕公网域名和 Cloudflare。
+用户访问 `ciyuan-chat` 可以走 Cloudflare；`ciyuan-chat` 访问 Sub2API 和生图接口不要走 Cloudflare 代理域名。这样可以避免长耗时生图请求被 Cloudflare 超时中断，也能把 Sub2API 暴露面收窄到只允许 Chat 服务器访问。
 
 ## 2. 环境要求
 
-- Docker 与 Docker Compose
-- 已运行的 Sub2API 服务
-- Sub2API 在宿主机上能通过 `http://127.0.0.1` 访问
+- Chat 服务器：部署本项目、Nginx、Docker 与 Docker Compose。
+- Sub2API 服务器：已运行 Sub2API，并开放给 Chat 服务器的直连端口。
+- 生图直连服务器：可以是 Sub2API 同机，也可以是单独服务；关键是 `IMAGE_API_BASE_URL` 不经过 Cloudflare。
 
-当前 `docker-compose.yml` 已默认配置：
+仓库根目录可以创建 `.env` 覆盖 `docker-compose.yml` 默认值：
 
-```yaml
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-environment:
-  API_BASE_URL: http://host.docker.internal/v1
-  IMAGE_API_BASE_URL: https://imgapi.ciyuan.fast/v1
-  FRAME_ANCESTORS: "'self' https://ciyuan.fast https://*.ciyuan.fast"
+```env
+API_BASE_URL=http://<sub2api服务器内网IP或公网IP>:<端口>/v1
+IMAGE_API_BASE_URL=http://<生图直连服务器IP或域名>:<端口>/v1
+UPSTREAM_TIMEOUT_MS=600000
+FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
-如果你的 Sub2API 不在同一台服务器，请把 `API_BASE_URL` 改成实际可访问的内网或公网地址。图片接口会通过 `IMAGE_API_BASE_URL` 单独转发，不再复用普通 API 地址。
+如果 Sub2API 和 Chat 在同一台机器，仍可使用默认值：
 
-## 3. 服务器部署
+```env
+API_BASE_URL=http://host.docker.internal/v1
+```
+
+## 3. 两台服务器直连配置
+
+假设：
+
+```text
+Chat 服务器公网/出口 IP：203.0.113.10
+Sub2API 服务器内网 IP：10.0.0.20
+Sub2API 端口：3000
+生图直连服务 IP：10.0.0.30
+生图直连端口：3000
+```
+
+Chat 服务器的 `.env`：
+
+```env
+API_BASE_URL=http://10.0.0.20:3000/v1
+IMAGE_API_BASE_URL=http://10.0.0.30:3000/v1
+UPSTREAM_TIMEOUT_MS=600000
+```
+
+在 Chat 服务器验证连通性：
+
+```bash
+curl -i http://10.0.0.20:3000/v1/models
+curl -i http://10.0.0.30:3000/v1/models
+```
+
+如果生图接口不是 `/v1/models` 风格，就用你的生图服务健康检查地址替换第二条命令。
+
+## 4. Sub2API 服务器只允许 Chat 服务器访问
+
+用 UFW 的示例：
+
+```bash
+ufw allow from 203.0.113.10 to any port 3000 proto tcp
+ufw deny 3000/tcp
+ufw reload
+ufw status numbered
+```
+
+用 iptables 的示例：
+
+```bash
+iptables -A INPUT -p tcp -s 203.0.113.10 --dport 3000 -j ACCEPT
+iptables -A INPUT -p tcp --dport 3000 -j DROP
+```
+
+如果 Chat 和 Sub2API 走内网 IP，把 `203.0.113.10` 换成 Chat 服务器访问 Sub2API 时实际使用的内网源 IP。配置后从非 Chat 服务器测试 Sub2API 端口应连接失败。
+
+## 5. Chat 服务器部署
 
 拉取代码：
 
@@ -38,6 +90,13 @@ environment:
 cd /opt
 git clone https://github.com/jzg-lab/ai_chat_web.git
 cd ai_chat_web
+```
+
+创建 `.env`：
+
+```bash
+cp chat-server/.env.example .env
+vi .env
 ```
 
 启动：
@@ -72,38 +131,12 @@ curl http://127.0.0.1:3000/chat-api/health
 {"ok":true}
 ```
 
-## 4. 验证 Sub2API 连通性
-
-在宿主机上测试：
-
-```bash
-curl -i http://127.0.0.1/v1/models
-```
-
-在 chat 容器里测试：
-
-```bash
-docker compose exec ciyuan-chat wget -S -O- http://host.docker.internal/v1/models
-```
-
-如果宿主机能通、容器不通，检查 Docker 版本是否支持 `host-gateway`。如果 Sub2API 不在宿主机 80 端口，请修改 `API_BASE_URL`。
-
-## 5. 临时直连访问
-
-用于测试时，可以直接访问：
-
-```text
-http://服务器IP:3000/chat/
-```
-
-这只是临时测试入口。生产环境更推荐走域名和 Nginx 的 80/443。
-
 ## 6. Nginx 反向代理
 
-把下面配置放进你的域名 server 块中：
+把下面配置放进你的域名 `server` 块中：
 
 ```nginx
-location /chat {
+location = /chat {
     proxy_pass http://127.0.0.1:3000;
     proxy_http_version 1.1;
     proxy_set_header Host $host;

@@ -8,18 +8,21 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      API_BASE_URL: http://host.docker.internal/v1
-      IMAGE_API_BASE_URL: https://imgapi.ciyuan.fast/v1
-      MODELS_ENDPOINT: /models
-      CHAT_COMPLETIONS_ENDPOINT: /chat/completions
-      RESPONSES_ENDPOINT: /responses
-      IMAGE_GENERATIONS_ENDPOINT: /images/generations
-      IMAGE_EDITS_ENDPOINT: /images/edits
-      IMAGE_VARIATIONS_ENDPOINT: /images/variations
-      IMAGE_MODEL: ""
-      PORT: 3000
-      UPSTREAM_TIMEOUT_MS: 600000
-      FRAME_ANCESTORS: "'self' https://ciyuan.fast https://*.ciyuan.fast"
+      # 两台服务器部署时，在仓库根目录 .env 中设置：
+      # API_BASE_URL=http://<sub2api服务器内网IP>:<端口>/v1
+      # IMAGE_API_BASE_URL=http://<生图直连服务器IP或域名>:<端口>/v1
+      API_BASE_URL: ${API_BASE_URL:-http://host.docker.internal/v1}
+      IMAGE_API_BASE_URL: ${IMAGE_API_BASE_URL:-https://imgapi.ciyuan.fast/v1}
+      MODELS_ENDPOINT: ${MODELS_ENDPOINT:-/models}
+      CHAT_COMPLETIONS_ENDPOINT: ${CHAT_COMPLETIONS_ENDPOINT:-/chat/completions}
+      RESPONSES_ENDPOINT: ${RESPONSES_ENDPOINT:-/responses}
+      IMAGE_GENERATIONS_ENDPOINT: ${IMAGE_GENERATIONS_ENDPOINT:-/images/generations}
+      IMAGE_EDITS_ENDPOINT: ${IMAGE_EDITS_ENDPOINT:-/images/edits}
+      IMAGE_VARIATIONS_ENDPOINT: ${IMAGE_VARIATIONS_ENDPOINT:-/images/variations}
+      IMAGE_MODEL: ${IMAGE_MODEL:-}
+      PORT: ${PORT:-3000}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-600000}
+      FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self' https://ciyuan.fast https://*.ciyuan.fast}
     expose:
       - "3000"
     ports:

@@ -29,6 +29,13 @@ type Mode = "chat" | "image";
 type ThemeMode = "auto" | "light" | "dark";
 type ImageQuality = "standard" | "hd" | "low" | "medium" | "high";
 type ImageResponseFormat = "url" | "b64_json";
+type ModelFamily = "gpt" | "claude" | "other";
+
+type ChatModel = {
+  label: string;
+  value: string;
+  family: ModelFamily;
+};
 
 type ImageParams = {
   model: string;
@@ -62,12 +69,14 @@ const API_KEY_KEY = "ciyuan.chat.apiKey.v1";
 const THEME_KEY = "ciyuan.chat.theme.v1";
 const IMAGE_PARAMS_KEY = "ciyuan.chat.imageParams.v1";
 
-const MODELS = [
-  { label: "GPT-5.5", value: "gpt-5.5" },
-  { label: "GPT-5.4", value: "gpt-5.4" },
-  { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
-  { label: "GPT-5.2", value: "gpt-5.2" }
+const FALLBACK_MODELS: ChatModel[] = [
+  { label: "GPT-5.5", value: "gpt-5.5", family: "gpt" },
+  { label: "GPT-5.4", value: "gpt-5.4", family: "gpt" },
+  { label: "GPT-5.3 Codex", value: "gpt-5.3-codex", family: "gpt" },
+  { label: "GPT-5.2", value: "gpt-5.2", family: "gpt" }
 ];
+
+const MODEL_LABELS: Record<string, string> = Object.fromEntries(FALLBACK_MODELS.map((item) => [item.value, item.label]));
 
 const IMAGE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512", "1792x1024", "1024x1792"];
 const IMAGE_MODELS = [
@@ -203,6 +212,57 @@ function imageUrlsForMessage(message: Message) {
   return message.imageUrls?.length ? message.imageUrls : message.imageUrl ? [message.imageUrl] : [];
 }
 
+function modelFamily(value: string): ModelFamily {
+  const lower = value.toLowerCase();
+  if (lower.startsWith("claude") || lower.includes("claude")) return "claude";
+  if (lower.startsWith("gpt") || lower.includes("gpt")) return "gpt";
+  return "other";
+}
+
+function modelLabel(value: string) {
+  if (MODEL_LABELS[value]) return MODEL_LABELS[value];
+  return value
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => (part.length <= 3 ? part.toUpperCase() : `${part[0].toUpperCase()}${part.slice(1)}`))
+    .join(" ");
+}
+
+function isChatModelId(value: string) {
+  const lower = value.toLowerCase();
+  return !["image", "dall-e", "embedding", "whisper", "tts", "moderation"].some((marker) => lower.includes(marker));
+}
+
+function parseModels(payload: unknown): ChatModel[] {
+  const data = (payload as { data?: unknown })?.data;
+  if (!Array.isArray(data)) return [];
+  const seen = new Set<string>();
+  return data
+    .map((item) => {
+      const id = typeof item === "string" ? item : (item as { id?: unknown })?.id;
+      return typeof id === "string" ? id.trim() : "";
+    })
+    .filter((id) => {
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map((id) => ({
+      label: modelLabel(id),
+      value: id,
+      family: modelFamily(id)
+    }))
+    .filter((item) => (item.family === "gpt" || item.family === "claude") && isChatModelId(item.value));
+}
+
+function groupedModels(models: ChatModel[]) {
+  const groups: Array<{ family: ModelFamily; label: string; models: ChatModel[] }> = [
+    { family: "gpt", label: "GPT", models: models.filter((item) => item.family === "gpt") },
+    { family: "claude", label: "Claude", models: models.filter((item) => item.family === "claude") }
+  ];
+  return groups.filter((group) => group.models.length > 0);
+}
+
 function App() {
   const [conversations, setConversations] = React.useState<Conversation[]>(loadConversations);
   const [activeId, setActiveId] = React.useState(() => conversations[0]?.id ?? createConversation().id);
@@ -210,7 +270,9 @@ function App() {
   const [draftKey, setDraftKey] = React.useState(apiKey);
   const [showSettings, setShowSettings] = React.useState(!apiKey);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
-  const [model, setModel] = React.useState(MODELS[0].value);
+  const [models, setModels] = React.useState<ChatModel[]>(FALLBACK_MODELS);
+  const [modelsLoading, setModelsLoading] = React.useState(false);
+  const [model, setModel] = React.useState(FALLBACK_MODELS[0].value);
   const [mode, setMode] = React.useState<Mode>("chat");
   const [theme, setTheme] = React.useState<ThemeMode>(getInitialTheme);
   const [resolvedTheme, setResolvedTheme] = React.useState(() => resolveTheme(getInitialTheme()));
@@ -225,6 +287,17 @@ function App() {
   const shouldStickToBottomRef = React.useRef(true);
 
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const modelGroups = groupedModels(models);
+  const hasGptModels = models.some((item) => item.family === "gpt");
+  const currentModel = models.find((item) => item.value === model);
+  const canUseImages = hasGptModels;
+  const topbarSubtitle = modelsLoading
+    ? "正在读取可用模型"
+    : mode === "image"
+      ? "GPT 生图接口"
+      : currentModel?.family === "claude"
+        ? "Claude 系列对话"
+        : "GPT 系列对话";
 
   React.useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
@@ -233,6 +306,55 @@ function App() {
   React.useEffect(() => {
     localStorage.setItem(IMAGE_PARAMS_KEY, JSON.stringify(imageParams));
   }, [imageParams]);
+
+  React.useEffect(() => {
+    if (!apiKey) {
+      setModels(FALLBACK_MODELS);
+      setModel(FALLBACK_MODELS[0].value);
+      setMode("chat");
+      return;
+    }
+
+    let alive = true;
+    const controller = new AbortController();
+    async function loadModels() {
+      setModelsLoading(true);
+      try {
+        const response = await fetch("/chat-api/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const parsed = parseModels(await response.json());
+        if (!parsed.length) throw new Error("模型接口未返回 GPT 或 Claude 模型。");
+        if (!alive) return;
+        setModels(parsed);
+        setNotice("");
+      } catch (error) {
+        if (!alive || (error as Error).name === "AbortError") return;
+        setModels(FALLBACK_MODELS);
+        setMode("chat");
+        setNotice(`模型列表读取失败，已使用默认 GPT 列表。${(error as Error).message || ""}`);
+      } finally {
+        if (alive) setModelsLoading(false);
+      }
+    }
+
+    loadModels();
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [apiKey]);
+
+  React.useEffect(() => {
+    if (!models.some((item) => item.value === model)) {
+      setModel(models[0]?.value ?? FALLBACK_MODELS[0].value);
+    }
+    if (!models.some((item) => item.family === "gpt")) {
+      setMode("chat");
+    }
+  }, [model, models]);
 
   React.useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
@@ -413,6 +535,11 @@ function App() {
       setShowSettings(true);
       return;
     }
+    if (mode === "image" && !canUseImages) {
+      setMode("chat");
+      setNotice("当前 Key 只返回 Claude 模型，暂不支持生图。");
+      return;
+    }
 
     const conversationId = active.id;
     const assistantId = newId();
@@ -459,6 +586,15 @@ function App() {
 
   function updateImageParam<K extends keyof ImageParams>(key: K, value: ImageParams[K]) {
     setImageParams((current) => ({ ...current, [key]: value }));
+  }
+
+  function switchMode(nextMode: Mode) {
+    if (nextMode === "image" && !canUseImages) {
+      setMode("chat");
+      setNotice("当前 Key 只返回 Claude 模型，暂不支持生图。");
+      return;
+    }
+    setMode(nextMode);
   }
 
   return (
@@ -518,72 +654,29 @@ function App() {
           </button>
           <div className="topbar-title">
             <strong>{mode === "chat" ? "智能对话" : "图像生成"}</strong>
-            <span>{mode === "chat" ? "实时流式输出" : "OpenAI 风格图片接口"}</span>
+            <span>{topbarSubtitle}</span>
           </div>
           <div className="topbar-controls">
-            {mode === "chat" ? (
-              <label className="select-field compact">
-                <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型">
-                  {MODELS.map((item) => (
-                    <option value={item.value} key={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} />
-              </label>
-            ) : (
-              <div className="topbar-image-params">
-                <label className="select-field compact">
-                  <select value={imageParams.model} onChange={(event) => updateImageParam("model", event.target.value)} aria-label="选择生图模型">
-                    {IMAGE_MODELS.map((item) => (
-                      <option key={item.value} value={item.value}>
+            <label className="select-field compact">
+              <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="选择模型" disabled={modelsLoading}>
+                {modelGroups.length > 1
+                  ? modelGroups.map((group) => (
+                      <optgroup key={group.family} label={group.label}>
+                        {group.models.map((item) => (
+                          <option value={item.value} key={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : models.map((item) => (
+                      <option value={item.value} key={item.value}>
                         {item.label}
                       </option>
                     ))}
-                  </select>
-                  <ChevronDown size={16} />
-                </label>
-                <label className="select-field compact">
-                  <select value={imageParams.size} onChange={(event) => updateImageParam("size", event.target.value)} aria-label="选择图片尺寸">
-                    {IMAGE_SIZES.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} />
-                </label>
-                <label className="select-field compact">
-                  <select
-                    value={imageParams.quality}
-                    onChange={(event) => updateImageParam("quality", event.target.value as ImageQuality)}
-                    aria-label="选择图片质量"
-                  >
-                    {IMAGE_QUALITIES.map((quality) => (
-                      <option key={quality} value={quality}>
-                        {quality}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} />
-                </label>
-                <label className="select-field compact">
-                  <select
-                    value={imageParams.responseFormat}
-                    onChange={(event) => updateImageParam("responseFormat", event.target.value as ImageResponseFormat)}
-                    aria-label="选择图片返回格式"
-                  >
-                    {IMAGE_FORMATS.map((format) => (
-                      <option key={format} value={format}>
-                        {format}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} />
-                </label>
-              </div>
-            )}
+              </select>
+              <ChevronDown size={16} />
+            </label>
           </div>
           <button className="key-state" onClick={() => setShowSettings(true)}>
             {apiKey ? <Check size={16} /> : <KeyRound size={16} />}
@@ -636,20 +729,75 @@ function App() {
           <div className="composer-panel">
             <div className="composer-toolbar">
               <div className="mode-switch" role="tablist" aria-label="模式">
-                <button className={mode === "chat" ? "active" : ""} onClick={() => setMode("chat")}>
+                <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")}>
                   <Bot size={16} />
                   <span>对话</span>
                 </button>
-                <button className={mode === "image" ? "active" : ""} onClick={() => setMode("image")}>
-                  <Image size={16} />
-                  <span>生图</span>
-                </button>
+                {canUseImages && (
+                  <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")}>
+                    <Image size={16} />
+                    <span>生图</span>
+                  </button>
+                )}
               </div>
               <button className="theme-button" onClick={() => setTheme(theme === "auto" ? "light" : theme === "light" ? "dark" : "auto")}>
                 {theme === "dark" ? <Moon size={16} /> : theme === "light" ? <Sun size={16} /> : <Sparkles size={16} />}
                 <span>{theme === "auto" ? "自动" : theme === "light" ? "浅色" : "深色"}</span>
               </button>
             </div>
+
+            {mode === "image" && canUseImages && (
+              <div className="composer-image-params">
+                <label className="select-field compact">
+                  <select value={imageParams.model} onChange={(event) => updateImageParam("model", event.target.value)} aria-label="选择生图模型">
+                    {IMAGE_MODELS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select value={imageParams.size} onChange={(event) => updateImageParam("size", event.target.value)} aria-label="选择图片尺寸">
+                    {IMAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select
+                    value={imageParams.quality}
+                    onChange={(event) => updateImageParam("quality", event.target.value as ImageQuality)}
+                    aria-label="选择图片质量"
+                  >
+                    {IMAGE_QUALITIES.map((quality) => (
+                      <option key={quality} value={quality}>
+                        {quality}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select
+                    value={imageParams.responseFormat}
+                    onChange={(event) => updateImageParam("responseFormat", event.target.value as ImageResponseFormat)}
+                    aria-label="选择图片返回格式"
+                  >
+                    {IMAGE_FORMATS.map((format) => (
+                      <option key={format} value={format}>
+                        {format}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+              </div>
+            )}
 
             <div className="composer">
               <textarea

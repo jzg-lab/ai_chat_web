@@ -323,15 +323,6 @@ button {
   align-items: center;
 }
 
-.topbar-image-params {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .topbar-title strong {
   display: block;
   font-size: 22px;
@@ -352,8 +343,6 @@ button {
 }
 
 .select-field select,
-.image-params select,
-.image-params input,
 .modal input {
   height: 42px;
   border: 1px solid var(--border);
@@ -374,15 +363,6 @@ button {
 .select-field select {
   min-width: 166px;
   appearance: none;
-}
-
-.topbar-image-params .select-field select {
-  min-width: 118px;
-  max-width: 168px;
-}
-
-.topbar-image-params .select-field:first-child select {
-  min-width: 158px;
 }
 
 .key-state {
@@ -592,6 +572,31 @@ button {
   margin-bottom: 8px;
 }
 
+.composer-image-params {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.composer-image-params .select-field {
+  flex: 0 0 auto;
+}
+
+.composer-image-params .select-field select {
+  min-width: 124px;
+  height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.composer-image-params .select-field:first-child select {
+  min-width: 164px;
+}
+
 .mode-switch {
   display: inline-flex;
   gap: 4px;
@@ -758,15 +763,6 @@ button {
   .topbar-title {
     flex: 1 1 220px;
   }
-
-  .topbar-controls {
-    order: 2;
-    flex: 1 1 100%;
-  }
-
-  .topbar-image-params {
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 760px) {
@@ -792,7 +788,17 @@ button {
 
   .topbar {
     min-height: 66px;
+    gap: 8px;
     padding: 0 10px;
+  }
+
+  .topbar-title {
+    flex: 1 1 68px;
+  }
+
+  .topbar-controls .select-field select {
+    min-width: 112px;
+    max-width: 136px;
   }
 
   .topbar-title span,
@@ -806,13 +812,6 @@ button {
 
   .select-field select {
     min-width: 126px;
-  }
-
-  .topbar-image-params .select-field,
-  .topbar-image-params .select-field select {
-    min-width: 0;
-    width: 100%;
-    max-width: none;
   }
 
   .message {
@@ -831,6 +830,18 @@ button {
 
   .composer-toolbar {
     align-items: stretch;
+  }
+
+  .composer-image-params {
+    margin: 0 -10px 8px;
+    padding: 0 10px 8px;
+    flex-wrap: nowrap;
+  }
+
+  .composer-image-params .select-field select,
+  .composer-image-params .select-field:first-child select {
+    min-width: 132px;
+    max-width: 168px;
   }
 
   .theme-button span {
