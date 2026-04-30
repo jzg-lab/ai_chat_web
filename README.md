@@ -41,7 +41,7 @@ IMAGE_MODEL=
 PORT=3000
 ```
 
-Nginx 反代参考：`deploy/nginx-ciyuan-chat.conf`。
+Nginx 反代参考：`deploy/nginx-ciyuan-chat.conf`。如果是两台服务器并且重视安全边界，先看 `SECURE_DEPLOY.md`。
 
 Sub2API 后台自定义菜单 URL 填：
 

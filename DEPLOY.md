@@ -1,5 +1,7 @@
 # 词元.fast Chat 部署说明
 
+安全部署优先看 [SECURE_DEPLOY.md](SECURE_DEPLOY.md)。这份文件保留常规部署流程，`SECURE_DEPLOY.md` 额外说明如何让 Sub2API 只允许 Chat 服务器访问。
+
 ## 1. 推荐架构
 
 生产环境建议把用户入口和上游 API 分开：
