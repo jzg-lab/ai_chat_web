@@ -756,7 +756,7 @@ function App() {
           {notice && <div className="notice">{notice}</div>}
           <div className="composer-panel">
             <div className="composer-params">
-              {renderModelSelect()}
+              {mode === "chat" && renderModelSelect()}
               {mode === "image" && canUseImages && (
                 <>
                 <label className="select-field compact">
