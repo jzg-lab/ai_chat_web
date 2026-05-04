@@ -5,6 +5,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createImageJob, getImageJob } from "./imageJobs.js";
+import { generatedImagesDir } from "./imageStorage.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -175,6 +177,36 @@ app.post("/chat-api/images/generations", async (req, res) => {
   await forwardImage(req, res, imageGenerationEndpoint);
 });
 
+app.post("/chat-api/image-jobs", (req, res) => {
+  const authorization = getAuthorization(req);
+  if (!authorization) {
+    res.status(401).json({ error: { message: "请先填写 API Key。" } });
+    return;
+  }
+
+  const body = { ...req.body };
+  if (imageModel && !body.model) {
+    body.model = imageModel;
+  }
+
+  const job = createImageJob(body, authorization, {
+    upstreamUrl: joinUrl(imageApiBaseUrl, imageGenerationEndpoint),
+    upstreamTimeoutMs
+  });
+
+  res.status(202).json(job);
+});
+
+app.get("/chat-api/image-jobs/:jobId", (req, res) => {
+  const job = getImageJob(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: { message: "生图任务不存在或已过期。" } });
+    return;
+  }
+
+  res.json(job);
+});
+
 app.post("/chat-api/images/edits", async (req, res) => {
   await forwardImage(req, res, imageEditsEndpoint);
 });
@@ -186,6 +218,8 @@ app.post("/chat-api/images/variations", async (req, res) => {
 app.get("/chat-api/health", (_req, res) => {
   res.json({ ok: true });
 });
+
+app.use("/chat-assets/images", express.static(generatedImagesDir, { index: false, immutable: true, maxAge: "30m" }));
 
 app.use("/chat", express.static(webDist, { index: false }));
 app.get(["/chat", "/chat/*"], (_req, res) => {

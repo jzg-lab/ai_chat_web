@@ -30,6 +30,7 @@ type ThemeMode = "auto" | "light" | "dark";
 type ImageQuality = "standard" | "hd" | "low" | "medium" | "high";
 type ImageResponseFormat = "url" | "b64_json";
 type ModelFamily = "gpt" | "claude" | "other";
+type ImageJobStatus = "queued" | "running" | "succeeded" | "failed";
 
 type ChatModel = {
   label: string;
@@ -210,6 +211,25 @@ function extractImageUrls(payload: unknown): string[] {
       return "";
     })
     .filter(Boolean);
+}
+
+function wait(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    const abort = () => {
+      window.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function imageUrlsForMessage(message: Message) {
@@ -511,7 +531,7 @@ function App() {
     };
     body.model = imageParams.model;
 
-    const response = await fetch("/chat-api/images/generations", {
+    const response = await fetch("/chat-api/image-jobs", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -525,14 +545,42 @@ function App() {
       throw new Error(await readError(response));
     }
 
-    const payload = await response.json();
-    const imageUrls = extractImageUrls(payload);
-    if (!imageUrls.length) throw new Error("生图接口未返回可显示的图片地址。");
-    patchMessage(conversationId, assistantId, {
-      content: `${prompt}\n\n已生成 ${imageUrls.length} 张图片。`,
-      imageUrls,
-      pending: false
-    });
+    const created = (await response.json()) as { job_id?: string; status?: ImageJobStatus };
+    if (!created.job_id) throw new Error("生图任务创建失败。");
+
+    while (true) {
+      await wait(2000, controller.signal);
+      const statusResponse = await fetch(`/chat-api/image-jobs/${encodeURIComponent(created.job_id)}`, {
+        signal: controller.signal
+      });
+
+      if (!statusResponse.ok) {
+        throw new Error(await readError(statusResponse));
+      }
+
+      const job = (await statusResponse.json()) as { status?: ImageJobStatus; images?: string[]; error?: string };
+      if (job.status === "queued" || job.status === "running") {
+        patchMessage(conversationId, assistantId, { content: `${prompt}\n\n正在生成图片...`, pending: true });
+        continue;
+      }
+
+      if (job.status === "succeeded") {
+        const imageUrls = Array.isArray(job.images) ? job.images.filter(Boolean) : extractImageUrls(job);
+        if (!imageUrls.length) throw new Error("生图任务完成，但未返回可显示的图片地址。");
+        patchMessage(conversationId, assistantId, {
+          content: `${prompt}\n\n已生成 ${imageUrls.length} 张图片。`,
+          imageUrls,
+          pending: false
+        });
+        return;
+      }
+
+      if (job.status === "failed") {
+        throw new Error(job.error || "生图任务失败。");
+      }
+
+      throw new Error("生图任务返回了未知状态。");
+    }
   }
 
   async function submit() {
