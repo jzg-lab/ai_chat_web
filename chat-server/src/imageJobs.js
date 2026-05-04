@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
-import { downloadAndSaveImage, saveBase64Image } from "./imageStorage.js";
+import { deleteGeneratedImage, downloadAndSaveImage, saveBase64Image } from "./imageStorage.js";
 
 const JOB_TTL_MS = 30 * 60 * 1000;
-const BODY_PREVIEW_LIMIT = 500;
+const BODY_PREVIEW_LIMIT = 300;
 const jobs = new Map();
 
 function publicJob(job) {
@@ -42,10 +42,35 @@ function warnJob(job, message, extra = {}) {
   });
 }
 
+function authorizationDebug(authorization) {
+  const value = typeof authorization === "string" ? authorization.trim() : "";
+  const startsWithBearer = value.toLowerCase().startsWith("bearer ");
+  const token = startsWithBearer ? value.replace(/^bearer\s+/i, "").trim() : value;
+  return {
+    has_authorization: Boolean(value),
+    authorization_starts_with_bearer: startsWithBearer,
+    authorization_preview: token ? `${token.slice(0, 6)}...${token.slice(-4)}` : ""
+  };
+}
+
+async function cleanupJob(job) {
+  for (const image of job.images || []) {
+    try {
+      const deleted = await deleteGeneratedImage(image);
+      if (deleted) {
+        logJob(job, "deleted generated image", { image_url: image });
+      }
+    } catch (error) {
+      warnJob(job, "generated image cleanup failed", { image_url: image, error: error?.message || "unknown error" });
+    }
+  }
+  jobs.delete(job.id);
+}
+
 function scheduleCleanup(job) {
   clearTimeout(job.cleanupTimer);
   job.cleanupTimer = setTimeout(() => {
-    jobs.delete(job.id);
+    cleanupJob(job);
   }, JOB_TTL_MS);
   job.cleanupTimer.unref?.();
 }
@@ -101,7 +126,7 @@ async function persistImage(item, timeoutMs) {
 async function runImageJob(job, options) {
   job.status = "running";
   job.updatedAt = Date.now();
-  logJob(job, "started", { upstream_url: options.upstreamUrl });
+  logJob(job, "started", { upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.upstreamTimeoutMs);
@@ -193,7 +218,7 @@ export function createImageJob(body, authorization, options) {
   };
 
   jobs.set(job.id, job);
-  logJob(job, "queued", { upstream_url: options.upstreamUrl });
+  logJob(job, "queued", { upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
   setImmediate(() => {
     runImageJob(job, options);
   });

@@ -81,7 +81,11 @@ function getAuthorization(req) {
   if (!authorization || !authorization.toLowerCase().startsWith("bearer ")) {
     return "";
   }
-  return authorization;
+  let token = authorization.replace(/^bearer\s+/i, "").trim();
+  while (token.toLowerCase().startsWith("bearer ")) {
+    token = token.replace(/^bearer\s+/i, "").trim();
+  }
+  return token ? `Bearer ${token}` : "";
 }
 
 async function forwardUpstream(req, res, origin, endpoint, { method = "POST", body } = {}) {

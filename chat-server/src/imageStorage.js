@@ -82,3 +82,26 @@ export async function downloadAndSaveImage(imageUrl, { timeoutMs = 600000 } = {}
     clearTimeout(timeout);
   }
 }
+
+export async function deleteGeneratedImage(publicUrl) {
+  let pathname = "";
+  try {
+    pathname = new URL(publicUrl, "http://local").pathname;
+  } catch {
+    return false;
+  }
+
+  if (!pathname.startsWith(`${generatedImagesPublicPath}/`)) {
+    return false;
+  }
+
+  const filename = path.basename(decodeURIComponent(pathname));
+  const resolvedDir = path.resolve(generatedImagesDir);
+  const filePath = path.resolve(generatedImagesDir, filename);
+  if (!filePath.startsWith(`${resolvedDir}${path.sep}`)) {
+    return false;
+  }
+
+  await fs.rm(filePath, { force: true });
+  return true;
+}
