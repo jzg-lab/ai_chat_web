@@ -95,7 +95,7 @@ const DEFAULT_IMAGE_PARAMS: ImageParams = {
   size: "1024x1024",
   n: 1,
   quality: "standard",
-  responseFormat: "url"
+  responseFormat: "b64_json"
 };
 
 const newId = () => {

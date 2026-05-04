@@ -58,7 +58,7 @@ export async function saveBase64Image(value) {
 export async function downloadAndSaveImage(imageUrl, { timeoutMs = 600000 } = {}) {
   const parsed = new URL(imageUrl);
   if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("上游返回了不支持的图片地址。");
+    throw new Error("Upstream returned an unsupported image URL.");
   }
 
   const controller = new AbortController();
@@ -67,13 +67,17 @@ export async function downloadAndSaveImage(imageUrl, { timeoutMs = 600000 } = {}
   try {
     const response = await fetch(parsed, { signal: controller.signal });
     if (!response.ok) {
-      throw new Error("下载上游图片失败。");
+      throw new Error(`Image download failed with status ${response.status}.`);
     }
 
     const contentType = response.headers.get("content-type") || "";
     const buffer = Buffer.from(await response.arrayBuffer());
     const fallback = extensionFromContentType(contentType) || "png";
-    return saveImageBuffer(buffer, { extension: detectImageExtension(buffer, fallback) });
+    const detected = detectImageExtension(buffer, "");
+    if (!detected && contentType && !contentType.toLowerCase().startsWith("image/") && contentType !== "application/octet-stream") {
+      throw new Error(`Image download returned non-image content-type: ${contentType}.`);
+    }
+    return saveImageBuffer(buffer, { extension: detected || fallback });
   } finally {
     clearTimeout(timeout);
   }

@@ -188,6 +188,9 @@ app.post("/chat-api/image-jobs", (req, res) => {
   if (imageModel && !body.model) {
     body.model = imageModel;
   }
+  if (!body.response_format || body.response_format === "url") {
+    body.response_format = "b64_json";
+  }
 
   const job = createImageJob(body, authorization, {
     upstreamUrl: joinUrl(imageApiBaseUrl, imageGenerationEndpoint),

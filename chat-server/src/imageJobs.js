@@ -2,24 +2,44 @@ import crypto from "node:crypto";
 import { downloadAndSaveImage, saveBase64Image } from "./imageStorage.js";
 
 const JOB_TTL_MS = 30 * 60 * 1000;
+const BODY_PREVIEW_LIMIT = 500;
 const jobs = new Map();
 
 function publicJob(job) {
   const payload = {
     job_id: job.id,
     status: job.status,
+    error: job.error || "",
+    upstream_status: job.upstreamStatus ?? null,
     created_at: job.createdAt,
     updated_at: job.updatedAt
   };
 
+  if (job.upstreamBodyPreview) {
+    payload.upstream_body_preview = job.upstreamBodyPreview;
+  }
+  if (job.warnings?.length) {
+    payload.warnings = job.warnings;
+  }
   if (job.status === "succeeded") {
     payload.images = job.images;
   }
-  if (job.status === "failed") {
-    payload.error = job.error || "生图任务失败。";
-  }
 
   return payload;
+}
+
+function logJob(job, message, extra = {}) {
+  console.log(`[image-job] ${message}`, {
+    job_id: job.id,
+    ...extra
+  });
+}
+
+function warnJob(job, message, extra = {}) {
+  console.warn(`[image-job] ${message}`, {
+    job_id: job.id,
+    ...extra
+  });
 }
 
 function scheduleCleanup(job) {
@@ -33,20 +53,19 @@ function scheduleCleanup(job) {
 function failMessage(status, payload) {
   if (payload && typeof payload === "object") {
     const body = payload;
-    return body.error?.message || body.message || `上游生图接口请求失败 ${status}`;
+    return body.error?.message || body.message || `Upstream request failed ${status}`;
   }
   if (typeof payload === "string" && payload.trim()) {
-    return payload.trim().slice(0, 500);
+    return payload.trim().slice(0, BODY_PREVIEW_LIMIT);
   }
-  return `上游生图接口请求失败 ${status}`;
+  return `Upstream request failed ${status}`;
 }
 
-async function readUpstreamError(response) {
-  const text = await response.text();
+function readUpstreamMessage(status, text) {
   try {
-    return failMessage(response.status, JSON.parse(text));
+    return failMessage(status, JSON.parse(text));
   } catch {
-    return failMessage(response.status, text);
+    return failMessage(status, text);
   }
 }
 
@@ -63,17 +82,26 @@ function extractImages(payload) {
 
 async function persistImage(item, timeoutMs) {
   if (item.b64_json) {
-    return saveBase64Image(item.b64_json);
+    return { url: await saveBase64Image(item.b64_json) };
   }
   if (item.url.startsWith("data:image/")) {
-    return saveBase64Image(item.url);
+    return { url: await saveBase64Image(item.url) };
   }
-  return downloadAndSaveImage(item.url, { timeoutMs });
+
+  try {
+    return { url: await downloadAndSaveImage(item.url, { timeoutMs }) };
+  } catch (error) {
+    return {
+      url: item.url,
+      warning: `Image download failed, returned upstream URL fallback: ${error?.message || "unknown error"}`
+    };
+  }
 }
 
 async function runImageJob(job, options) {
   job.status = "running";
   job.updatedAt = Date.now();
+  logJob(job, "started", { upstream_url: options.upstreamUrl });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.upstreamTimeoutMs);
@@ -89,28 +117,58 @@ async function runImageJob(job, options) {
       signal: controller.signal
     });
 
+    job.upstreamStatus = upstream.status;
+    logJob(job, "upstream responded", { upstream_url: options.upstreamUrl, upstream_status: upstream.status });
+
+    const upstreamText = await upstream.text();
+    job.upstreamBodyPreview = upstreamText.slice(0, BODY_PREVIEW_LIMIT);
     if (!upstream.ok) {
-      throw new Error(await readUpstreamError(upstream));
+      const message = `Upstream ${upstream.status}: ${readUpstreamMessage(upstream.status, upstreamText)}`;
+      warnJob(job, "upstream failed", {
+        upstream_url: options.upstreamUrl,
+        upstream_status: upstream.status,
+        upstream_body_preview: job.upstreamBodyPreview,
+        error: message
+      });
+      throw new Error(message);
     }
 
-    const payload = await upstream.json();
+    let payload;
+    try {
+      payload = JSON.parse(upstreamText);
+    } catch {
+      throw new Error(`Upstream ${upstream.status}: invalid JSON response`);
+    }
+
     const imageItems = extractImages(payload);
     if (!imageItems.length) {
-      throw new Error("生图接口未返回可保存的图片。");
+      throw new Error(`Upstream ${upstream.status}: image response did not include url or b64_json`);
     }
 
     const images = [];
     for (const item of imageItems) {
-      images.push(await persistImage(item, options.upstreamTimeoutMs));
+      const saved = await persistImage(item, options.upstreamTimeoutMs);
+      images.push(saved.url);
+      if (saved.warning) {
+        job.warnings.push(saved.warning);
+        warnJob(job, "image persistence warning", { error: saved.warning });
+      }
     }
 
     job.status = "succeeded";
     job.images = images;
     job.updatedAt = Date.now();
+    logJob(job, "succeeded", { image_count: images.length, warnings: job.warnings.length });
   } catch (error) {
     job.status = "failed";
-    job.error = error?.name === "AbortError" ? "上游生图接口响应超时。" : error?.message || "生图任务失败。";
+    job.error = error?.name === "AbortError" ? "Upstream image request timed out." : error?.message || "Image job failed.";
     job.updatedAt = Date.now();
+    warnJob(job, "failed", {
+      upstream_url: options.upstreamUrl,
+      upstream_status: job.upstreamStatus ?? null,
+      upstream_body_preview: job.upstreamBodyPreview || "",
+      error: job.error
+    });
   } finally {
     clearTimeout(timeout);
     delete job.authorization;
@@ -128,10 +186,14 @@ export function createImageJob(body, authorization, options) {
     body,
     authorization,
     images: [],
-    error: ""
+    error: "",
+    upstreamStatus: null,
+    upstreamBodyPreview: "",
+    warnings: []
   };
 
   jobs.set(job.id, job);
+  logJob(job, "queued", { upstream_url: options.upstreamUrl });
   setImmediate(() => {
     runImageJob(job, options);
   });
