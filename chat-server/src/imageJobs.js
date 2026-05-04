@@ -67,11 +67,11 @@ async function cleanupJob(job) {
   jobs.delete(job.id);
 }
 
-function scheduleCleanup(job) {
+function scheduleCleanup(job, delayMs = JOB_TTL_MS) {
   clearTimeout(job.cleanupTimer);
   job.cleanupTimer = setTimeout(() => {
     cleanupJob(job);
-  }, JOB_TTL_MS);
+  }, delayMs);
   job.cleanupTimer.unref?.();
 }
 
@@ -229,4 +229,15 @@ export function createImageJob(body, authorization, options) {
 export function getImageJob(jobId) {
   const job = jobs.get(jobId);
   return job ? publicJob(job) : null;
+}
+
+export function markImageJobDelivered(jobId, cleanupDelayMs) {
+  const job = jobs.get(jobId);
+  if (!job || job.status !== "succeeded" || job.deliveredAt) {
+    return;
+  }
+
+  job.deliveredAt = Date.now();
+  logJob(job, "delivered, cleanup scheduled", { cleanup_delay_ms: cleanupDelayMs });
+  scheduleCleanup(job, cleanupDelayMs);
 }

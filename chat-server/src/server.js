@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createImageJob, getImageJob } from "./imageJobs.js";
+import { createImageJob, getImageJob, markImageJobDelivered } from "./imageJobs.js";
 import { generatedImagesDir } from "./imageStorage.js";
 
 const app = express();
@@ -22,6 +22,7 @@ const imageEditsEndpoint = process.env.IMAGE_EDITS_ENDPOINT || "/images/edits";
 const imageVariationsEndpoint = process.env.IMAGE_VARIATIONS_ENDPOINT || "/images/variations";
 const imageModel = process.env.IMAGE_MODEL || "";
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 600000);
+const imageJobDeliveryCleanupMs = Number(process.env.IMAGE_JOB_DELIVERY_CLEANUP_MS || 120000);
 const frameAncestors = (process.env.FRAME_ANCESTORS || "'self' https://ciyuan.fast https://*.ciyuan.fast")
   .split(/\s+/)
   .filter(Boolean);
@@ -212,6 +213,9 @@ app.get("/chat-api/image-jobs/:jobId", (req, res) => {
   }
 
   res.json(job);
+  if (job.status === "succeeded") {
+    markImageJobDelivered(req.params.jobId, imageJobDeliveryCleanupMs);
+  }
 });
 
 app.post("/chat-api/images/edits", async (req, res) => {
