@@ -67,6 +67,10 @@ function joinUrl(origin, endpoint) {
   return `${origin}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 }
 
+function isOpenAIImageModel(value) {
+  return String(value || "").toLowerCase().startsWith("gpt-image");
+}
+
 function publicHeaders(headers) {
   const next = {};
   const allow = ["content-type", "cache-control"];
@@ -193,7 +197,7 @@ app.post("/chat-api/image-jobs", (req, res) => {
   if (imageModel && !body.model) {
     body.model = imageModel;
   }
-  if (!body.response_format || body.response_format === "url") {
+  if (!body.response_format || (isOpenAIImageModel(body.model) && body.response_format === "url")) {
     body.response_format = "b64_json";
   }
 

@@ -98,6 +98,17 @@ const DEFAULT_IMAGE_PARAMS: ImageParams = {
   responseFormat: "b64_json"
 };
 
+function isOpenAIImageModel(value: string) {
+  return value.toLowerCase().startsWith("gpt-image");
+}
+
+function normalizeImageParams(params: ImageParams): ImageParams {
+  if (isOpenAIImageModel(params.model) && params.responseFormat !== "b64_json") {
+    return { ...params, responseFormat: "b64_json" };
+  }
+  return params;
+}
+
 const newId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -133,12 +144,12 @@ function loadImageParams(): ImageParams {
     if (!raw) return DEFAULT_IMAGE_PARAMS;
     const parsed = JSON.parse(raw) as Partial<ImageParams>;
     const savedModel = parsed.model;
-    return {
+    return normalizeImageParams({
       ...DEFAULT_IMAGE_PARAMS,
       ...parsed,
       model: savedModel && IMAGE_MODELS.some((item) => item.value === savedModel) ? savedModel : DEFAULT_IMAGE_PARAMS.model,
       n: 1
-    };
+    });
   } catch {
     return DEFAULT_IMAGE_PARAMS;
   }
@@ -315,6 +326,7 @@ function App() {
   const hasGptModels = models.some((item) => item.family === "gpt");
   const currentModel = models.find((item) => item.value === model);
   const canUseImages = hasGptModels;
+  const imageResponseFormats: ImageResponseFormat[] = isOpenAIImageModel(imageParams.model) ? ["b64_json"] : IMAGE_FORMATS;
   const topbarSubtitle = modelsLoading
     ? "正在读取可用模型"
     : mode === "image"
@@ -640,7 +652,7 @@ function App() {
   }
 
   function updateImageParam<K extends keyof ImageParams>(key: K, value: ImageParams[K]) {
-    setImageParams((current) => ({ ...current, [key]: value }));
+    setImageParams((current) => normalizeImageParams({ ...current, [key]: value }));
   }
 
   function switchMode(nextMode: Mode) {
@@ -846,8 +858,9 @@ function App() {
                     value={imageParams.responseFormat}
                     onChange={(event) => updateImageParam("responseFormat", event.target.value as ImageResponseFormat)}
                     aria-label="选择图片返回格式"
+                    disabled={imageResponseFormats.length === 1}
                   >
-                    {IMAGE_FORMATS.map((format) => (
+                    {imageResponseFormats.map((format) => (
                       <option key={format} value={format}>
                         {format}
                       </option>
