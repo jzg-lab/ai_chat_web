@@ -226,6 +226,8 @@ JSON_BODY_LIMIT=32mb
 - 生成图片也会在 job 清理时删除，所以返回图片后要及时下载或转存。
 - `/v1/image-jobs/:jobId` 查询会校验 `Authorization`，必须和创建 job 时的 Bearer Key 匹配。
 - 这个匹配使用 `IMAGE_JOB_OWNER_SECRET` 做 HMAC。生产环境建议固定配置，不要留空。
+- 上游长时间无响应时，worker 会按 `UPSTREAM_TIMEOUT_MS` 把 job 标记为 `failed`，避免网页端一直显示生成中。
+- 网页端生图消息会显示 `任务 ID: imgjob_xxx`，排查时可用该 ID 对照服务端 `[image-job]` 日志。
 - 如果容器重启，内存 job 会丢失；已经保存到持久化目录里的图片文件仍在，但原 job 状态无法继续查询。
 
 生产建议：
@@ -432,6 +434,7 @@ HTTP/2 200
 - Nginx 没有代理 `/v1/`，外部异步接口 404。
 - Nginx 没有代理 `/chat-assets/`，生图成功但图片 URL 404。
 - `IMAGE_API_BASE_URL` 填了 Cloudflare 域名，后端 worker 的长请求仍可能被 Cloudflare 切断。
+- `UPSTREAM_TIMEOUT_MS` 设置过大，失败会很晚才回到网页；设置过小，复杂图片编辑可能被提前中断。默认 10 分钟。
 - 没有固定 `IMAGE_JOB_OWNER_SECRET`，容器重启后新旧进程的 job 查询校验不一致。
 - 容器重启会丢内存 job；如果业务要可靠队列，需要后续把 job 状态迁到 Redis 或数据库。
 - 图片是临时资源，默认成功查询后 1 小时清理；外部业务拿到 URL 后应尽快下载转存。

@@ -297,6 +297,7 @@ function imageJobMessage(prompt: string, jobId: string, status: string) {
 }
 
 function imageJobErrorMessage(jobId: string, message: string) {
+  if (message.includes(jobId)) return message;
   return `图片任务失败\n\n任务 ID: ${jobId}\n\n${message}`;
 }
 
@@ -616,7 +617,7 @@ function App() {
             error: true,
             imageJobId: undefined,
             imageJobPrompt: undefined,
-            content: (error as Error).message || imageJobErrorMessage(job.jobId, "Image generation failed.")
+            content: imageJobErrorMessage(job.jobId, (error as Error).message || "Image generation failed.")
           });
         })
         .finally(() => {

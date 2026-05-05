@@ -83,7 +83,9 @@ Authorization: Bearer <user-api-key>
 4. 前端每 2 秒轮询 `GET /chat-api/image-jobs/:jobId`。
 5. 成功后返回 `/chat-assets/images/...` 图片 URL。
 
-`gpt-image-*` 系列只使用 `b64_json` 返回格式；DALL-E 系列仍可使用 `url` 或 `b64_json`。生成图片保存在 `chat-server/storage/generated-images`，任务成功状态首次回传后默认 1 小时清理本地图片和 job，可用 `IMAGE_JOB_DELIVERY_CLEANUP_MS` 调整。
+前端会在生图消息里显示 `任务 ID: imgjob_xxx`。如果生图或图片编辑卡住，直接用这个 ID 对照服务端 `[image-job]` 日志排查。当前会话存在未完成图片任务时，前端会暂时禁止继续提交和切换模式，避免同一会话叠加多个不明状态的任务。
+
+`gpt-image-*` 系列只使用 `b64_json` 返回格式；DALL-E 系列仍可使用 `url` 或 `b64_json`。生成图片保存在 `chat-server/storage/generated-images`，任务成功状态首次回传后默认 1 小时清理本地图片和 job，可用 `IMAGE_JOB_DELIVERY_CLEANUP_MS` 调整。上游长时间无响应时，后端会按 `UPSTREAM_TIMEOUT_MS` 将 job 标记为 `failed`，避免一直停留在生成中。
 
 ## 对外异步接口
 
@@ -145,6 +147,7 @@ Authorization: Bearer <user-api-key>
 - 停止生成
 - 对话 / 生图切换，生图模式支持模型、尺寸、数量、质量、返回格式
 - 异步生图任务，避免浏览器和 Cloudflare 长请求超时
+- 生图消息显示 `imgjob_xxx` 任务 ID，方便按后端日志排查卡住或失败的任务
 - 多张图片 URL 或 base64 结果进入当前会话，点击图片可在 iframe 内预览
 - 浅色、深色、自动主题，默认跟随系统
 

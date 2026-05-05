@@ -78,6 +78,8 @@ curl -i http://10.0.0.30:3000/v1/models
 - 网页生图支持 `n=1..10` 数量批量；`dall-e-3` 自动限制为 `n=1`。
 - 网页对话可上传图片；网页生图上传参考图时走异步图片编辑 job。
 - 对外异步接口包含 `POST /v1/images/generations` 与 `POST /v1/images/edits`，统一使用 `GET /v1/image-jobs/:jobId` 轮询。
+- 网页生图消息会显示 `任务 ID: imgjob_xxx`，可用于对照服务端 `[image-job]` 日志排查卡住或失败的任务。
+- 上游长时间无响应时，后端按 `UPSTREAM_TIMEOUT_MS` 将图片 job 标记为 `failed`。
 - 上传相关配置：`IMAGE_UPLOAD_TTL_MS`、`IMAGE_UPLOAD_MAX_BYTES`、`IMAGE_UPLOAD_MAX_FILES`、`JSON_BODY_LIMIT`。
 
 ## 4. Sub2API 服务器只允许 Chat 服务器访问
