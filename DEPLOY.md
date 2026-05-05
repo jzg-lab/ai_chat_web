@@ -14,6 +14,8 @@ ciyuan-chat -> 生图直连服务器地址 -> 生图上游服务
 
 用户访问 `ciyuan-chat` 可以走 Cloudflare；`ciyuan-chat` 访问 Sub2API 和生图接口不要走 Cloudflare 代理域名。这样可以避免长耗时生图请求被 Cloudflare 超时中断，也能把 Sub2API 暴露面收窄到只允许 Chat 服务器访问。
 
+生图在本项目内使用异步 job：浏览器只创建任务并轮询状态，真正的生图长请求由 `ciyuan-chat` 后端 worker 直连上游完成。生成图片会临时保存到 Chat 服务器，并通过 `/chat-assets/images/...` 返回给前端。
+
 ## 2. 环境要求
 
 - Chat 服务器：部署本项目、Nginx、Docker 与 Docker Compose。
@@ -26,6 +28,7 @@ ciyuan-chat -> 生图直连服务器地址 -> 生图上游服务
 API_BASE_URL=http://<sub2api服务器内网IP或公网IP>:<端口>/v1
 IMAGE_API_BASE_URL=http://<生图直连服务器IP或域名>:<端口>/v1
 UPSTREAM_TIMEOUT_MS=600000
+IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
 FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
@@ -53,6 +56,7 @@ Chat 服务器的 `.env`：
 API_BASE_URL=http://10.0.0.20:3000/v1
 IMAGE_API_BASE_URL=http://10.0.0.30:3000/v1
 UPSTREAM_TIMEOUT_MS=600000
+IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
 ```
 
 在 Chat 服务器验证连通性：
@@ -163,6 +167,15 @@ location /chat-api/ {
     proxy_cache off;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /chat-assets/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

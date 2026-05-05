@@ -14,6 +14,7 @@ ciyuan-chat -> 生图直连地址 -> 生图上游
 - Sub2API 服务器不要对公网开放给所有人，只允许 Chat 服务器的固定 IP 访问。
 - `IMAGE_API_BASE_URL` 不走 Cloudflare 代理域名，避免生图长请求被 Cloudflare 超时切断。
 - 用户 API Key 只在浏览器 localStorage，Node 代理只转发，不落库、不打印请求体。
+- 生图使用异步 job：浏览器轮询 Chat 服务器，长请求由 Chat 后端 worker 直连上游，生成图片经 `/chat-assets/images/` 临时暴露。
 
 ## 1. 规划 IP 和端口
 
@@ -103,6 +104,7 @@ vi .env
 API_BASE_URL=http://10.0.0.20:3000/v1
 IMAGE_API_BASE_URL=http://10.0.0.30:3000/v1
 UPSTREAM_TIMEOUT_MS=600000
+IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
 FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
@@ -111,6 +113,7 @@ FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 - `API_BASE_URL` 指向 Sub2API 的直连地址。
 - `IMAGE_API_BASE_URL` 指向生图直连地址，不要填 Cloudflare 代理后的域名。
 - `UPSTREAM_TIMEOUT_MS=600000` 是 10 分钟，用于放宽长请求。
+- `IMAGE_JOB_DELIVERY_CLEANUP_MS=120000` 表示异步生图成功状态首次回传后，临时图片和 job 默认 120 秒后清理。
 - `FRAME_ANCESTORS` 控制允许哪些站点把 `/chat/` 嵌入 iframe；不需要 iframe 时可以只保留 `"'self'"`。
 
 启动：
@@ -162,6 +165,15 @@ location /chat-api/ {
     proxy_cache off;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /chat-assets/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -271,5 +283,6 @@ docker compose exec ciyuan-chat wget -S -O- http://10.0.0.20:3000/v1/models
 - `API_BASE_URL` 使用 Sub2API 直连地址。
 - `IMAGE_API_BASE_URL` 使用生图直连地址，不经过 Cloudflare。
 - Nginx `/chat-api/` 已关闭 buffering，并设置较长 timeout。
+- Nginx 已代理 `/chat-assets/`，否则异步生图成功后图片 URL 会 404。
 - `.env` 不提交到 Git。
 - 部署后从非 Chat 服务器确认 Sub2API 端口无法访问。
