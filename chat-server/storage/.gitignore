@@ -1,0 +1,4 @@
+generated-images/*
+uploaded-images/*
+!generated-images/.gitkeep
+!uploaded-images/.gitkeep

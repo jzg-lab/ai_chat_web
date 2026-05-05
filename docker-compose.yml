@@ -33,3 +33,5 @@ services:
       - "3000"
     ports:
       - "3000:3000"
+    volumes:
+      - ./chat-server/storage/generated-images:/app/chat-server/storage/generated-images
