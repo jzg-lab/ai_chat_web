@@ -292,6 +292,14 @@ function readSseDelta(line: string) {
   }
 }
 
+function imageJobMessage(prompt: string, jobId: string, status: string) {
+  return `${prompt}\n\n${status}\n\n任务 ID: ${jobId}`;
+}
+
+function imageJobErrorMessage(jobId: string, message: string) {
+  return `图片任务失败\n\n任务 ID: ${jobId}\n\n${message}`;
+}
+
 function shouldOfferImageTool(text: string, imageCount: number) {
   const lower = text.toLowerCase();
   if (
@@ -608,7 +616,7 @@ function App() {
             error: true,
             imageJobId: undefined,
             imageJobPrompt: undefined,
-            content: (error as Error).message || "Image generation failed."
+            content: (error as Error).message || imageJobErrorMessage(job.jobId, "Image generation failed.")
           });
         })
         .finally(() => {
@@ -683,13 +691,13 @@ function App() {
       });
 
       if (!statusResponse.ok) {
-        throw new Error(await readError(statusResponse));
+        throw new Error(imageJobErrorMessage(jobId, await readError(statusResponse)));
       }
 
       const job = (await statusResponse.json()) as { status?: ImageJobStatus; images?: string[]; error?: string };
       if (job.status === "queued" || job.status === "running") {
         patchMessage(conversationId, assistantId, {
-          content: `${prompt}\n\nGenerating image...`,
+          content: imageJobMessage(prompt, jobId, "正在生成图片..."),
           pending: true,
           imageJobId: jobId,
           imageJobPrompt: prompt
@@ -699,9 +707,9 @@ function App() {
 
       if (job.status === "succeeded") {
         const imageUrls = Array.isArray(job.images) ? job.images.filter(Boolean) : extractImageUrls(job);
-        if (!imageUrls.length) throw new Error("Image job completed without a displayable image URL.");
+        if (!imageUrls.length) throw new Error(imageJobErrorMessage(jobId, "Image job completed without a displayable image URL."));
         patchMessage(conversationId, assistantId, {
-          content: `${prompt}\n\nGenerated ${imageUrls.length} image${imageUrls.length > 1 ? "s" : ""}. Please save it soon; temporary images are cleaned up later.`,
+          content: imageJobMessage(prompt, jobId, `已生成 ${imageUrls.length} 张图片，请尽快保存，临时图片稍后会清理。`),
           imageUrls,
           pending: false,
           imageJobId: undefined,
@@ -711,10 +719,10 @@ function App() {
       }
 
       if (job.status === "failed") {
-        throw new Error(job.error || "Image generation failed.");
+        throw new Error(imageJobErrorMessage(jobId, job.error || "Image generation failed."));
       }
 
-      throw new Error("Image job returned an unknown status.");
+      throw new Error(imageJobErrorMessage(jobId, "Image job returned an unknown status."));
     }
   }
 
@@ -914,7 +922,7 @@ function App() {
 
     pollingImageJobsRef.current.add(created.job_id);
     patchMessage(conversationId, assistantId, {
-      content: `${prompt}\n\nGenerating image...`,
+      content: imageJobMessage(prompt, created.job_id, "正在生成图片..."),
       pending: true,
       imageJobId: created.job_id,
       imageJobPrompt: prompt
