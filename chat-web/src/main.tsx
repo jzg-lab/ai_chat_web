@@ -8,6 +8,7 @@ import {
   ChevronDown,
   FileText,
   Image,
+  ImagePlus,
   KeyRound,
   Menu,
   MessageSquarePlus,
@@ -1065,6 +1066,45 @@ function App() {
     addAttachmentFiles(files);
   }
 
+  async function useImageForEdit(url: string) {
+    if (!canUseImages) {
+      setNotice("Image editing needs a GPT-capable key.");
+      return;
+    }
+    if (busy) {
+      setNotice("Wait for the current response to finish before editing an image.");
+      return;
+    }
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setNotice(`Upload at most ${MAX_ATTACHMENTS} attachments.`);
+      return;
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Image download failed ${response.status}.`);
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) throw new Error("Selected asset is not an image.");
+      const extension = blob.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+      const file = new File([blob], `edit-reference-${Date.now()}.${extension}`, { type: blob.type || "image/png", lastModified: Date.now() });
+      setAttachments((current) => [
+        ...current,
+        {
+          id: newId(),
+          kind: "image",
+          file,
+          name: file.name,
+          url: URL.createObjectURL(file)
+        }
+      ]);
+      setMode("image");
+      setInput("");
+      setNotice("Image added as an edit reference. Describe the changes you want.");
+    } catch (error) {
+      setNotice((error as Error).message || "Could not use this image for editing.");
+    }
+  }
+
   function removeAttachment(id: string) {
     setAttachments((current) => {
       const item = current.find((attachment) => attachment.id === id);
@@ -1221,9 +1261,15 @@ function App() {
                     {urls.length > 0 && (
                       <div className={`image-grid count-${Math.min(urls.length, 4)}`}>
                         {urls.map((url, index) => (
-                          <button key={`${url}-${index}`} className="image-thumb" onClick={() => setPreviewImage(url)}>
+                          <div key={`${url}-${index}`} className="image-tile">
+                            <button className="image-thumb" onClick={() => setPreviewImage(url)}>
                             <img src={url} alt={`${message.content || "生成图片"} ${index + 1}`} />
-                          </button>
+                            </button>
+                            <button className="image-edit-button" title="Edit this image" onClick={() => useImageForEdit(url)}>
+                              <ImagePlus size={15} />
+                              <span>Edit</span>
+                            </button>
+                          </div>
                         ))}
                       </div>
                     )}
