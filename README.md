@@ -147,3 +147,11 @@ Authorization: Bearer <user-api-key>
 - 异步生图任务，避免浏览器和 Cloudflare 长请求超时
 - 多张图片 URL 或 base64 结果进入当前会话，点击图片可在 iframe 内预览
 - 浅色、深色、自动主题，默认跟随系统
+
+## Image upload and edit upgrade
+
+- Web image mode now supports `n=1..10` for one-prompt batch generation. `dall-e-3` is clamped to `n=1`.
+- Web chat mode can attach images; the current request sends them as multimodal Chat Completions `image_url` content.
+- Web image mode can attach reference images; when references exist, `/chat-api/image-jobs` creates an async image edit job against `IMAGE_EDITS_ENDPOINT`.
+- External async API now includes `POST /v1/images/edits`, accepting multipart `image` / `image[]` plus optional `mask`, or JSON `images` entries with `image_url`, `url`, or `file_id`.
+- Upload controls are configured with `IMAGE_UPLOAD_TTL_MS`, `IMAGE_UPLOAD_MAX_BYTES`, `IMAGE_UPLOAD_MAX_FILES`, and `JSON_BODY_LIMIT`.

@@ -13,6 +13,7 @@ import {
   Moon,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
   Send,
   Settings,
   Sparkles,
@@ -90,6 +91,9 @@ const IMAGE_MODELS = [
 ];
 const IMAGE_QUALITIES: ImageQuality[] = ["standard", "hd", "low", "medium", "high"];
 const IMAGE_FORMATS: ImageResponseFormat[] = ["url", "b64_json"];
+const IMAGE_COUNTS = Array.from({ length: 10 }, (_item, index) => index + 1);
+const MAX_ATTACHMENTS = 16;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DEFAULT_IMAGE_PARAMS: ImageParams = {
   model: "gpt-image-2",
   size: "1024x1024",
@@ -98,15 +102,24 @@ const DEFAULT_IMAGE_PARAMS: ImageParams = {
   responseFormat: "b64_json"
 };
 
+type Attachment = {
+  id: string;
+  file: File;
+  name: string;
+  url: string;
+};
+
 function isOpenAIImageModel(value: string) {
   return value.toLowerCase().startsWith("gpt-image");
 }
 
 function normalizeImageParams(params: ImageParams): ImageParams {
+  const maxCount = params.model.toLowerCase() === "dall-e-3" ? 1 : 10;
+  const n = Math.min(Math.max(Number(params.n) || 1, 1), maxCount);
   if (isOpenAIImageModel(params.model) && params.responseFormat !== "b64_json") {
-    return { ...params, responseFormat: "b64_json" };
+    return { ...params, n, responseFormat: "b64_json" };
   }
-  return params;
+  return { ...params, n };
 }
 
 const newId = () => {
@@ -148,7 +161,7 @@ function loadImageParams(): ImageParams {
       ...DEFAULT_IMAGE_PARAMS,
       ...parsed,
       model: savedModel && IMAGE_MODELS.some((item) => item.value === savedModel) ? savedModel : DEFAULT_IMAGE_PARAMS.model,
-      n: 1
+      n: parsed.n ?? DEFAULT_IMAGE_PARAMS.n
     });
   } catch {
     return DEFAULT_IMAGE_PARAMS;
@@ -243,6 +256,15 @@ function wait(ms: number, signal: AbortSignal) {
   });
 }
 
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function imageUrlsForMessage(message: Message) {
   return message.imageUrls?.length ? message.imageUrls : message.imageUrl ? [message.imageUrl] : [];
 }
@@ -313,10 +335,12 @@ function App() {
   const [resolvedTheme, setResolvedTheme] = React.useState(() => resolveTheme(getInitialTheme()));
   const [imageParams, setImageParams] = React.useState<ImageParams>(loadImageParams);
   const [input, setInput] = React.useState("");
+  const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const messagesRef = React.useRef<HTMLElement | null>(null);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = React.useRef(true);
@@ -473,11 +497,21 @@ function App() {
     }));
   }
 
-  async function sendChat(conversationId: string, userText: string, assistantId: string) {
+  async function sendChat(conversationId: string, userText: string, assistantId: string, imageAttachments: Attachment[]) {
     const controller = new AbortController();
     abortRef.current = controller;
     const currentMessages =
       conversations.find((conversation) => conversation.id === conversationId)?.messages.filter((message) => !message.error) ?? [];
+    const currentUserContent =
+      imageAttachments.length > 0
+        ? [
+            { type: "text", text: userText || "Please analyze the attached image." },
+            ...(await Promise.all(imageAttachments.map(async (attachment) => ({
+              type: "image_url",
+              image_url: { url: await fileToDataUrl(attachment.file) }
+            }))))
+          ]
+        : userText;
 
     const response = await fetch("/chat-api/chat/completions", {
       method: "POST",
@@ -492,7 +526,7 @@ function App() {
           ...currentMessages
             .filter((message) => message.role === "user" || message.role === "assistant")
             .map((message) => ({ role: message.role, content: message.content })),
-          { role: "user", content: userText }
+          { role: "user", content: currentUserContent }
         ]
       }),
       signal: controller.signal
@@ -531,25 +565,43 @@ function App() {
     patchMessage(conversationId, assistantId, { content: content || "（空响应）", pending: false });
   }
 
-  async function sendImage(conversationId: string, prompt: string, assistantId: string) {
+  async function sendImage(conversationId: string, prompt: string, assistantId: string, imageAttachments: Attachment[]) {
     const controller = new AbortController();
     abortRef.current = controller;
-    const body: Record<string, string | number> = {
-      prompt,
-      size: imageParams.size,
-      n: 1,
-      quality: imageParams.quality,
-      response_format: imageParams.responseFormat
+    let requestBody: BodyInit;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`
     };
-    body.model = imageParams.model;
+
+    if (imageAttachments.length > 0) {
+      const form = new FormData();
+      form.append("prompt", prompt);
+      form.append("size", imageParams.size);
+      form.append("n", String(imageParams.n));
+      form.append("quality", imageParams.quality);
+      form.append("response_format", imageParams.responseFormat);
+      form.append("model", imageParams.model);
+      for (const attachment of imageAttachments) {
+        form.append("image[]", attachment.file, attachment.name);
+      }
+      requestBody = form;
+    } else {
+      const body: Record<string, string | number> = {
+        prompt,
+        size: imageParams.size,
+        n: imageParams.n,
+        quality: imageParams.quality,
+        response_format: imageParams.responseFormat
+      };
+      body.model = imageParams.model;
+      headers["Content-Type"] = "application/json";
+      requestBody = JSON.stringify(body);
+    }
 
     const response = await fetch("/chat-api/image-jobs", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body),
+      headers,
+      body: requestBody,
       signal: controller.signal
     });
 
@@ -597,7 +649,12 @@ function App() {
 
   async function submit() {
     const text = input.trim();
-    if (!text || busy) return;
+    const selectedAttachments = attachments;
+    if ((!text && selectedAttachments.length === 0) || busy) return;
+    if (mode === "image" && !text) {
+      setNotice("Image generation needs a prompt.");
+      return;
+    }
     if (!apiKey) {
       setShowSettings(true);
       return;
@@ -611,13 +668,15 @@ function App() {
     const conversationId = active.id;
     const assistantId = newId();
     setInput("");
+    setAttachments([]);
     setBusy(true);
     setNotice("");
 
     appendMessage(conversationId, {
       id: newId(),
       role: "user",
-      content: text,
+      content: text || "Attached image",
+      imageUrls: selectedAttachments.map((attachment) => attachment.url),
       createdAt: Date.now()
     });
     appendMessage(conversationId, {
@@ -629,8 +688,8 @@ function App() {
     });
 
     try {
-      if (mode === "chat") await sendChat(conversationId, text, assistantId);
-      else await sendImage(conversationId, text, assistantId);
+      if (mode === "chat") await sendChat(conversationId, text, assistantId, selectedAttachments);
+      else await sendImage(conversationId, text, assistantId, selectedAttachments);
     } catch (error) {
       if ((error as Error).name === "AbortError") {
         patchMessage(conversationId, assistantId, { pending: false, content: "已停止生成。" });
@@ -649,6 +708,39 @@ function App() {
 
   function stop() {
     abortRef.current?.abort();
+  }
+
+  function addAttachments(files: FileList | null) {
+    if (!files?.length) return;
+    const nextFiles = Array.from(files);
+    const imageFiles = nextFiles.filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHMENT_BYTES);
+    if (imageFiles.length !== nextFiles.length) {
+      setNotice("Only image files up to 20MB are supported.");
+    }
+    setAttachments((current) => {
+      const available = Math.max(MAX_ATTACHMENTS - current.length, 0);
+      const accepted = imageFiles.slice(0, available).map((file) => ({
+        id: newId(),
+        file,
+        name: file.name || "image",
+        url: URL.createObjectURL(file)
+      }));
+      if (imageFiles.length > available) {
+        setNotice(`Upload at most ${MAX_ATTACHMENTS} images.`);
+      }
+      return [...current, ...accepted];
+    });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => {
+      const item = current.find((attachment) => attachment.id === id);
+      if (item) URL.revokeObjectURL(item.url);
+      return current.filter((attachment) => attachment.id !== id);
+    });
   }
 
   function updateImageParam<K extends keyof ImageParams>(key: K, value: ImageParams[K]) {
@@ -841,6 +933,21 @@ function App() {
                 </label>
                 <label className="select-field compact">
                   <select
+                    value={imageParams.n}
+                    onChange={(event) => updateImageParam("n", Number(event.target.value))}
+                    aria-label="Select image count"
+                    disabled={imageParams.model.toLowerCase() === "dall-e-3"}
+                  >
+                    {IMAGE_COUNTS.map((count) => (
+                      <option key={count} value={count}>
+                        {count} img
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </label>
+                <label className="select-field compact">
+                  <select
                     value={imageParams.quality}
                     onChange={(event) => updateImageParam("quality", event.target.value as ImageQuality)}
                     aria-label="选择图片质量"
@@ -872,7 +979,39 @@ function App() {
               )}
             </div>
 
+            {attachments.length > 0 && (
+              <div className="attachment-tray">
+                {attachments.map((attachment) => (
+                  <div className="attachment-chip" key={attachment.id}>
+                    <button type="button" onClick={() => setPreviewImage(attachment.url)}>
+                      <img src={attachment.url} alt={attachment.name} />
+                    </button>
+                    <span>{attachment.name}</span>
+                    <button type="button" className="attachment-remove" onClick={() => removeAttachment(attachment.id)} aria-label="Remove image">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="composer">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                className="file-input"
+                onChange={(event) => addAttachments(event.target.files)}
+              />
+              <button
+                className="attach-button"
+                title={mode === "chat" ? "Attach image" : "Attach reference image"}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || attachments.length >= MAX_ATTACHMENTS}
+              >
+                <Paperclip size={18} />
+              </button>
               <textarea
                 value={input}
                 placeholder={mode === "chat" ? "输入消息..." : "描述你想生成的图片..."}

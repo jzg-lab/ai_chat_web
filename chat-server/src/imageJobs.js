@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import { deleteGeneratedImage, downloadAndSaveImage, saveBase64Image } from "./imageStorage.js";
+import fs from "node:fs/promises";
+import { deleteGeneratedImage, deleteUploadFile, downloadAndSaveImage, saveBase64Image } from "./imageStorage.js";
 
 const JOB_TTL_MS = 30 * 60 * 1000;
 const BODY_PREVIEW_LIMIT = 300;
@@ -9,6 +10,7 @@ const jobs = new Map();
 function publicJob(job) {
   const payload = {
     job_id: job.id,
+    operation: job.operation,
     status: job.status,
     error: job.error || "",
     upstream_status: job.upstreamStatus ?? null,
@@ -32,7 +34,7 @@ function publicJob(job) {
 function externalJob(job) {
   const payload = {
     id: job.id,
-    object: "image_generation.job",
+    object: job.operation === "edit" ? "image_edit.job" : "image_generation.job",
     status: job.status,
     created: Math.floor(job.createdAt / 1000),
     poll_url: `/v1/image-jobs/${job.id}`
@@ -102,6 +104,13 @@ async function cleanupJob(job) {
       warnJob(job, "generated image cleanup failed", { image_url: image, error: error?.message || "unknown error" });
     }
   }
+  for (const file of job.files || []) {
+    try {
+      await deleteUploadFile(file.path);
+    } catch {
+      // Temp upload cleanup is best-effort; generated image cleanup is the user-visible part.
+    }
+  }
   jobs.delete(job.id);
 }
 
@@ -161,22 +170,51 @@ async function persistImage(item, timeoutMs) {
   }
 }
 
+function previewBody(body, requestType) {
+  if (requestType !== "multipart") return JSON.stringify(body).slice(0, BODY_PREVIEW_LIMIT);
+  const safe = Object.fromEntries(Object.entries(body || {}).map(([key, value]) => [key, String(value).slice(0, 80)]));
+  return JSON.stringify({ ...safe, image: "[uploaded image files]" }).slice(0, BODY_PREVIEW_LIMIT);
+}
+
+async function createMultipartBody(body, files) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(body || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        form.append(key, typeof item === "object" ? JSON.stringify(item) : String(item));
+      }
+      continue;
+    }
+    form.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+
+  for (const file of files || []) {
+    const buffer = await fs.readFile(file.path);
+    const blob = new Blob([buffer], { type: file.mimeType || "application/octet-stream" });
+    form.append(file.fieldName || "image[]", blob, file.filename || "image.png");
+  }
+  return form;
+}
+
 async function runImageJob(job, options) {
   job.status = "running";
   job.updatedAt = Date.now();
-  logJob(job, "started", { upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
+  logJob(job, "started", { operation: job.operation, upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.upstreamTimeoutMs);
 
   try {
+    const isMultipart = options.requestType === "multipart";
+    const requestBody = isMultipart ? await createMultipartBody(job.body, job.files) : JSON.stringify(job.body);
     const upstream = await fetch(options.upstreamUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        ...(isMultipart ? {} : { "Content-Type": "application/json" }),
         Authorization: job.authorization
       },
-      body: JSON.stringify(job.body),
+      body: requestBody,
       signal: controller.signal
     });
 
@@ -235,8 +273,16 @@ async function runImageJob(job, options) {
     });
   } finally {
     clearTimeout(timeout);
+    for (const file of job.files || []) {
+      try {
+        await deleteUploadFile(file.path);
+      } catch (error) {
+        warnJob(job, "upload cleanup failed", { file: file.filename, error: error?.message || "unknown error" });
+      }
+    }
     delete job.authorization;
     delete job.body;
+    delete job.files;
     scheduleCleanup(job);
   }
 }
@@ -244,10 +290,12 @@ async function runImageJob(job, options) {
 export function createImageJob(body, authorization, options) {
   const job = {
     id: `imgjob_${crypto.randomUUID().replace(/-/g, "")}`,
+    operation: options.operation || "generation",
     status: "queued",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     body,
+    files: options.files || [],
     authorization,
     ownerHash: ownerHash(authorization),
     images: [],
@@ -256,9 +304,10 @@ export function createImageJob(body, authorization, options) {
     upstreamBodyPreview: "",
     warnings: []
   };
+  job.upstreamBodyPreview = previewBody(body, options.requestType);
 
   jobs.set(job.id, job);
-  logJob(job, "queued", { upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
+  logJob(job, "queued", { operation: job.operation, upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
   setImmediate(() => {
     runImageJob(job, options);
   });
@@ -282,7 +331,7 @@ export function getExternalImageJob(jobId, authorization) {
 export function toExternalImageJob(job) {
   return {
     id: job.job_id,
-    object: "image_generation.job",
+    object: job.operation === "edit" ? "image_edit.job" : "image_generation.job",
     status: job.status,
     created: Math.floor(job.created_at / 1000),
     poll_url: `/v1/image-jobs/${job.job_id}`

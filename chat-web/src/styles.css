@@ -639,9 +639,88 @@ button {
 .composer {
   min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
   align-items: end;
   gap: 10px;
+}
+
+.file-input {
+  display: none;
+}
+
+.attach-button {
+  align-self: end;
+  width: 44px;
+  height: 46px;
+  border: 1px solid var(--muted-border);
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--shell);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attach-button:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.attach-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.attachment-tray {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 10px;
+  overflow-x: auto;
+}
+
+.attachment-chip {
+  flex: 0 0 auto;
+  width: 136px;
+  border: 1px solid var(--muted-border);
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background: var(--shell);
+}
+
+.attachment-chip button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.attachment-chip img {
+  display: block;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.attachment-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attachment-remove {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .composer textarea {
