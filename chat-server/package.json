@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js"
+    "check": "node --check src/server.js && node --check src/imageJobs.js && node --check src/imageStorage.js"
   },
   "dependencies": {
     "compression": "^1.7.5",

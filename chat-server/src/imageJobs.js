@@ -71,6 +71,15 @@ function warnJob(job, message, extra = {}) {
   });
 }
 
+function timeoutMessage(timeoutMs) {
+  if (timeoutMs < 60000) {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+    return `Upstream image request timed out after ${seconds} second${seconds === 1 ? "" : "s"}.`;
+  }
+  const minutes = Math.max(1, Math.round(timeoutMs / 60000));
+  return `Upstream image request timed out after ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
 function authorizationDebug(authorization) {
   const value = typeof authorization === "string" ? authorization.trim() : "";
   const startsWithBearer = value.toLowerCase().startsWith("bearer ");
@@ -203,7 +212,59 @@ async function runImageJob(job, options) {
   logJob(job, "started", { operation: job.operation, upstream_url: options.upstreamUrl, ...authorizationDebug(job.authorization) });
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.upstreamTimeoutMs);
+  let completed = false;
+  let cleaned = false;
+
+  const failJob = (message) => {
+    if (completed) return false;
+    completed = true;
+    job.status = "failed";
+    job.error = message;
+    job.updatedAt = Date.now();
+    return true;
+  };
+
+  const succeedJob = (images) => {
+    if (completed) return false;
+    completed = true;
+    job.status = "succeeded";
+    job.images = images;
+    job.completedAt = Date.now();
+    job.updatedAt = Date.now();
+    return true;
+  };
+
+  const cleanupJobData = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    for (const file of job.files || []) {
+      try {
+        await deleteUploadFile(file.path);
+      } catch (error) {
+        warnJob(job, "upload cleanup failed", { file: file.filename, error: error?.message || "unknown error" });
+      }
+    }
+    delete job.authorization;
+    delete job.body;
+    delete job.files;
+    scheduleCleanup(job);
+  };
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+    if (failJob(timeoutMessage(options.upstreamTimeoutMs))) {
+      warnJob(job, "timed out", {
+        upstream_url: options.upstreamUrl,
+        upstream_status: job.upstreamStatus ?? null,
+        upstream_body_preview: job.upstreamBodyPreview || "",
+        error: job.error
+      });
+      cleanupJobData().catch((error) => {
+        warnJob(job, "timeout cleanup failed", { error: error?.message || "unknown error" });
+      });
+    }
+  }, options.upstreamTimeoutMs);
+  timeout.unref?.();
 
   try {
     const isMultipart = options.requestType === "multipart";
@@ -256,34 +317,22 @@ async function runImageJob(job, options) {
       }
     }
 
-    job.status = "succeeded";
-    job.images = images;
-    job.completedAt = Date.now();
-    job.updatedAt = Date.now();
-    logJob(job, "succeeded", { image_count: images.length, warnings: job.warnings.length });
+    if (succeedJob(images)) {
+      logJob(job, "succeeded", { image_count: images.length, warnings: job.warnings.length });
+    }
   } catch (error) {
-    job.status = "failed";
-    job.error = error?.name === "AbortError" ? "Upstream image request timed out." : error?.message || "Image job failed.";
-    job.updatedAt = Date.now();
-    warnJob(job, "failed", {
-      upstream_url: options.upstreamUrl,
-      upstream_status: job.upstreamStatus ?? null,
-      upstream_body_preview: job.upstreamBodyPreview || "",
-      error: job.error
-    });
+    const message = error?.name === "AbortError" ? timeoutMessage(options.upstreamTimeoutMs) : error?.message || "Image job failed.";
+    if (failJob(message)) {
+      warnJob(job, "failed", {
+        upstream_url: options.upstreamUrl,
+        upstream_status: job.upstreamStatus ?? null,
+        upstream_body_preview: job.upstreamBodyPreview || "",
+        error: job.error
+      });
+    }
   } finally {
     clearTimeout(timeout);
-    for (const file of job.files || []) {
-      try {
-        await deleteUploadFile(file.path);
-      } catch (error) {
-        warnJob(job, "upload cleanup failed", { file: file.filename, error: error?.message || "unknown error" });
-      }
-    }
-    delete job.authorization;
-    delete job.body;
-    delete job.files;
-    scheduleCleanup(job);
+    await cleanupJobData();
   }
 }
 

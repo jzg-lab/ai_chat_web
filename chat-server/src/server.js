@@ -32,11 +32,16 @@ const imageGenerationEndpoint = process.env.IMAGE_ENDPOINT || process.env.IMAGE_
 const imageEditsEndpoint = process.env.IMAGE_EDITS_ENDPOINT || "/images/edits";
 const imageVariationsEndpoint = process.env.IMAGE_VARIATIONS_ENDPOINT || "/images/variations";
 const imageModel = process.env.IMAGE_MODEL || "";
-const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 600000);
-const imageJobDeliveryCleanupMs = Number(process.env.IMAGE_JOB_DELIVERY_CLEANUP_MS || 3600000);
-const imageUploadTtlMs = Number(process.env.IMAGE_UPLOAD_TTL_MS || 30 * 60 * 1000);
-const imageUploadMaxBytes = Number(process.env.IMAGE_UPLOAD_MAX_BYTES || 20 * 1024 * 1024);
-const imageUploadMaxFiles = Number(process.env.IMAGE_UPLOAD_MAX_FILES || 16);
+function positiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const upstreamTimeoutMs = positiveNumber(process.env.UPSTREAM_TIMEOUT_MS, 600000);
+const imageJobDeliveryCleanupMs = positiveNumber(process.env.IMAGE_JOB_DELIVERY_CLEANUP_MS, 3600000);
+const imageUploadTtlMs = positiveNumber(process.env.IMAGE_UPLOAD_TTL_MS, 30 * 60 * 1000);
+const imageUploadMaxBytes = positiveNumber(process.env.IMAGE_UPLOAD_MAX_BYTES, 20 * 1024 * 1024);
+const imageUploadMaxFiles = positiveNumber(process.env.IMAGE_UPLOAD_MAX_FILES, 16);
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "32mb";
 const frameAncestors = (process.env.FRAME_ANCESTORS || "'self' https://ciyuan.fast https://*.ciyuan.fast")
   .split(/\s+/)

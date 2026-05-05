@@ -489,6 +489,8 @@ function App() {
   const shouldStickToBottomRef = React.useRef(true);
 
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const activeImageJobPending = Boolean(active?.messages.some((message) => message.pending && message.imageJobId));
+  const interactionBusy = busy || activeImageJobPending;
   const modelGroups = groupedModels(models);
   const hasGptModels = models.some((item) => item.family === "gpt");
   const currentModel = models.find((item) => item.value === model);
@@ -928,6 +930,10 @@ function App() {
     const text = input.trim();
     const selectedAttachments = attachments;
     if ((!text && selectedAttachments.length === 0) || busyRef.current) return;
+    if (activeImageJobPending) {
+      setNotice("当前图片任务仍在处理，请等待结果或失败后再发送。");
+      return;
+    }
     if (mode === "image" && !text) {
       setNotice("Image generation needs a prompt.");
       return;
@@ -1121,7 +1127,7 @@ function App() {
   }
 
   function switchMode(nextMode: Mode) {
-    if (busyRef.current) {
+    if (busyRef.current || activeImageJobPending) {
       setNotice("请等待当前响应结束后再切换模式。");
       return;
     }
@@ -1222,12 +1228,12 @@ function App() {
           </div>
           <div className="topbar-controls">
             <div className="mode-switch topbar-mode-switch" role="tablist" aria-label="模式">
-              <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")} disabled={busy}>
+              <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")} disabled={interactionBusy}>
                 <Bot size={16} />
                 <span>对话</span>
               </button>
               {canUseImages && (
-                <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")} disabled={busy}>
+                <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")} disabled={interactionBusy}>
                   <Image size={16} />
                   <span>生图</span>
                 </button>
@@ -1400,7 +1406,7 @@ function App() {
                 className="attach-button"
                 title={mode === "chat" ? "Attach file or image" : "Attach reference image"}
                 onClick={() => fileInputRef.current?.click()}
-                disabled={busy || attachments.length >= MAX_ATTACHMENTS}
+                disabled={interactionBusy || attachments.length >= MAX_ATTACHMENTS}
               >
                 <Paperclip size={18} />
               </button>
@@ -1422,7 +1428,7 @@ function App() {
                   <Square size={18} />
                 </button>
               ) : (
-                <button className="send-button" title="发送" onClick={submit}>
+                <button className="send-button" title="发送" onClick={submit} disabled={activeImageJobPending}>
                   <Send size={18} />
                 </button>
               )}
