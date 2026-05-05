@@ -239,6 +239,8 @@ https://你的域名/chat/
 
 页面里填写 Key 后，模型列表应能正常读取。若提示模型列表读取失败：
 
+前端会对模型列表做 Codex 白名单过滤，只展示 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.2`。这是为了避免 Sub2API 返回 `gpt-4o-mini` 等模型后，Codex ChatGPT 账号调用时报 `model is not supported when using Codex with a ChatGPT account`。
+
 - 浏览器访问的是不是 `/chat/`，不是旧的开发端口。
 - Nginx 是否反代了 `/chat-api/`。
 - Chat 容器里是否能访问 `API_BASE_URL`。

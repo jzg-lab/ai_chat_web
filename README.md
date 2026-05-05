@@ -139,7 +139,7 @@ Authorization: Bearer <user-api-key>
 ## 已覆盖能力
 
 - 左侧会话列表、删除单会话、清空历史
-- 顶部模型选择：`gpt-5.5`、`gpt-5.4`、`gpt-5.3-codex`、`gpt-5.2`
+- 顶部模型选择只展示 Codex 支持的对话模型：`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.2`
 - API Key 本地保存，一次填写后刷新仍可用
 - 对话流式输出、Markdown 和代码块渲染
 - 停止生成
@@ -150,6 +150,7 @@ Authorization: Bearer <user-api-key>
 
 ## Image upload and edit upgrade
 
+- Chat model selection is restricted to Codex-supported model IDs so upstream-only models such as `gpt-4o-mini` are not sent to Codex accounts.
 - Web image mode now supports `n=1..10` for one-prompt batch generation. `dall-e-3` is clamped to `n=1`.
 - Web chat mode can attach images; the current request sends them as multimodal Chat Completions `image_url` content.
 - Web image mode can attach reference images; when references exist, `/chat-api/image-jobs` creates an async image edit job against `IMAGE_EDITS_ENDPOINT`.

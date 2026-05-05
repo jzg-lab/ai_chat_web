@@ -74,11 +74,13 @@ const IMAGE_PARAMS_KEY = "ciyuan.chat.imageParams.v1";
 const FALLBACK_MODELS: ChatModel[] = [
   { label: "GPT-5.5", value: "gpt-5.5", family: "gpt" },
   { label: "GPT-5.4", value: "gpt-5.4", family: "gpt" },
+  { label: "GPT-5.4 Mini", value: "gpt-5.4-mini", family: "gpt" },
   { label: "GPT-5.3 Codex", value: "gpt-5.3-codex", family: "gpt" },
   { label: "GPT-5.2", value: "gpt-5.2", family: "gpt" }
 ];
 
 const MODEL_LABELS: Record<string, string> = Object.fromEntries(FALLBACK_MODELS.map((item) => [item.value, item.label]));
+const CODEX_CHAT_MODEL_IDS = new Set(FALLBACK_MODELS.map((item) => item.value));
 
 const IMAGE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512", "1792x1024", "1024x1792"];
 const IMAGE_MODELS = [
@@ -290,6 +292,10 @@ function isChatModelId(value: string) {
   return !["image", "dall-e", "embedding", "whisper", "tts", "moderation"].some((marker) => lower.includes(marker));
 }
 
+function isCodexChatModelId(value: string) {
+  return CODEX_CHAT_MODEL_IDS.has(value);
+}
+
 function parseModels(payload: unknown): ChatModel[] {
   const data = (payload as { data?: unknown })?.data;
   if (!Array.isArray(data)) return [];
@@ -309,7 +315,8 @@ function parseModels(payload: unknown): ChatModel[] {
       value: id,
       family: modelFamily(id)
     }))
-    .filter((item) => (item.family === "gpt" || item.family === "claude") && isChatModelId(item.value));
+    .filter((item) => item.family === "gpt" && isChatModelId(item.value) && isCodexChatModelId(item.value))
+    .sort((a, b) => FALLBACK_MODELS.findIndex((item) => item.value === a.value) - FALLBACK_MODELS.findIndex((item) => item.value === b.value));
 }
 
 function groupedModels(models: ChatModel[]) {
