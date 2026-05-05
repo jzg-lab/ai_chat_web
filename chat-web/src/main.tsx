@@ -33,6 +33,11 @@ type ImageQuality = "standard" | "hd" | "low" | "medium" | "high";
 type ImageResponseFormat = "url" | "b64_json";
 type ModelFamily = "gpt" | "claude" | "other";
 type ImageJobStatus = "queued" | "running" | "succeeded" | "failed";
+type ChatMessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+type ChatMessagePayload = {
+  role: "system" | "user" | "assistant";
+  content: ChatMessageContent;
+};
 
 type ChatModel = {
   label: string;
@@ -167,6 +172,7 @@ const IMAGE_FILE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const TEXT_FILE_ACCEPT = Array.from(TEXT_FILE_EXTENSIONS)
   .map((extension) => `.${extension}`)
   .join(",");
+const IMAGE_TOOL_NAME = "generate_image";
 
 function isOpenAIImageModel(value: string) {
   return value.toLowerCase().startsWith("gpt-image");
@@ -281,6 +287,48 @@ function readSseDelta(line: string) {
   } catch {
     return "";
   }
+}
+
+function shouldOfferImageTool(text: string, imageCount: number) {
+  const lower = text.toLowerCase();
+  if (
+    /生成.*图|画.*图|生图|出图|绘制|画一|做一张|来一张|一张.*图|生成海报|生成封面|生成logo|生成头像|生成壁纸|生成表情包/.test(text)
+  ) {
+    return true;
+  }
+  if (/\b(generate|create|draw|make|render|design)\b[\s\S]{0,40}\b(image|picture|photo|poster|logo|illustration|wallpaper)\b/.test(lower)) {
+    return true;
+  }
+  if (imageCount > 0 && /修改|改成|换成|换背景|去掉|添加|变成|修图|重绘|编辑|make|turn|remove|replace|edit/.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+function parseJsonObject(value: unknown) {
+  if (!value) return {};
+  if (typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function extractImageToolPrompt(payload: unknown) {
+  const message = (payload as { choices?: Array<{ message?: unknown }> })?.choices?.[0]?.message as
+    | {
+        tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }>;
+        function_call?: { name?: string; arguments?: unknown };
+      }
+    | undefined;
+  const toolCall = message?.tool_calls?.find((item) => item.function?.name === IMAGE_TOOL_NAME);
+  const legacyCall = message?.function_call?.name === IMAGE_TOOL_NAME ? message.function_call : null;
+  const args = parseJsonObject(toolCall?.function?.arguments ?? legacyCall?.arguments);
+  const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+  return prompt;
 }
 
 function extractImageUrls(payload: unknown): string[] {
@@ -587,27 +635,105 @@ function App() {
     }));
   }
 
+  function conversationMessages(conversationId: string, currentUserContent: ChatMessageContent): ChatMessagePayload[] {
+    const currentMessages =
+      conversations.find((conversation) => conversation.id === conversationId)?.messages.filter((message) => !message.error) ?? [];
+    return [
+      ...currentMessages
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({ role: message.role as "user" | "assistant", content: message.content })),
+      { role: "user" as const, content: currentUserContent }
+    ];
+  }
+
+  async function maybeRunImageTool(
+    conversationId: string,
+    assistantId: string,
+    messages: ChatMessagePayload[],
+    textContent: string,
+    imageAttachments: Attachment[],
+    signal: AbortSignal
+  ) {
+    if (!shouldOfferImageTool(textContent, imageAttachments.length)) return false;
+
+    const response = await fetch("/chat-api/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages: [
+          {
+            role: "system",
+            content:
+              "If the user asks to create, draw, generate, edit, or transform an image, call generate_image with a clear prompt. For ordinary questions, answer normally."
+          },
+          ...messages
+        ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: IMAGE_TOOL_NAME,
+              description: "Generate or edit an image for the user. Use attached images as references when present.",
+              parameters: {
+                type: "object",
+                properties: {
+                  prompt: {
+                    type: "string",
+                    description: "A concise image generation or image edit prompt, preserving the user's intent and important visual details."
+                  }
+                },
+                required: ["prompt"]
+              }
+            }
+          }
+        ],
+        tool_choice: "auto"
+      }),
+      signal
+    });
+
+    if (!response.ok) return false;
+    const prompt = extractImageToolPrompt(await response.json());
+    if (!prompt) return false;
+
+    patchMessage(conversationId, assistantId, { content: `正在调用生图工具：${prompt}`, pending: true });
+    await sendImage(conversationId, prompt, assistantId, imageAttachments);
+    return true;
+  }
+
   async function sendChat(conversationId: string, userText: string, assistantId: string, selectedAttachments: Attachment[]) {
     const controller = new AbortController();
     abortRef.current = controller;
-    const currentMessages =
-      conversations.find((conversation) => conversation.id === conversationId)?.messages.filter((message) => !message.error) ?? [];
     const imageAttachments = selectedAttachments.filter((attachment) => attachment.kind === "image");
     const textAttachments = selectedAttachments.filter((attachment) => attachment.kind === "text");
     const fileText = textAttachments.length ? (await Promise.all(textAttachments.map(readTextAttachment))).join("\n\n") : "";
     const textContent = [userText || (imageAttachments.length ? "Please analyze the attached image." : "Please analyze the attached files."), fileText]
       .filter(Boolean)
       .join("\n\nAttached files:\n");
-    const currentUserContent =
+    const currentUserContent: ChatMessageContent =
       imageAttachments.length > 0
         ? [
-            { type: "text", text: textContent },
+            { type: "text" as const, text: textContent },
             ...(await Promise.all(imageAttachments.map(async (attachment) => ({
-              type: "image_url",
+              type: "image_url" as const,
               image_url: { url: await fileToDataUrl(attachment.file) }
             }))))
           ]
         : textContent;
+    const messages = conversationMessages(conversationId, currentUserContent);
+
+    try {
+      if (await maybeRunImageTool(conversationId, assistantId, messages, textContent, imageAttachments, controller.signal)) {
+        return;
+      }
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw error;
+    }
 
     const response = await fetch("/chat-api/chat/completions", {
       method: "POST",
@@ -618,12 +744,7 @@ function App() {
       body: JSON.stringify({
         model,
         stream: true,
-        messages: [
-          ...currentMessages
-            .filter((message) => message.role === "user" || message.role === "assistant")
-            .map((message) => ({ role: message.role, content: message.content })),
-          { role: "user", content: currentUserContent }
-        ]
+        messages
       }),
       signal: controller.signal
     });
