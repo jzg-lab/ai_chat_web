@@ -1,6 +1,6 @@
 # Cloudflare 与对外异步接口说明
 
-本项目除了 `/chat/` 网页入口，还提供了后端代理接口和对外异步生图接口。配 Cloudflare 时要把“用户访问入口”和“后端访问上游模型服务”分开看。
+本项目除了 `/chat/` 网页入口，还提供了后端代理接口和对外异步生图/修改图片接口。配 Cloudflare 时要把“用户访问入口”和“后端访问上游模型服务”分开看。
 
 ## 1. 推荐访问结构
 
@@ -19,7 +19,7 @@ ciyuan-chat 容器
 
 - 用户访问本项目域名可以走 Cloudflare。
 - `API_BASE_URL` 和 `IMAGE_API_BASE_URL` 不建议填 Cloudflare 代理后的域名，应填内网 IP、公网直连 IP，或不经过 Cloudflare 的源站地址。
-- 生图已做异步 job，外部调用方不会一直等上游生成完成；真正的长耗时请求由 `ciyuan-chat` 后端 worker 发给 `IMAGE_API_BASE_URL`。
+- 生图和修改图片已做异步 job，外部调用方不会一直等上游生成完成；真正的长耗时请求由 `ciyuan-chat` 后端 worker 发给 `IMAGE_API_BASE_URL`。
 
 ## 2. 对外路径
 
@@ -44,7 +44,7 @@ GET  /chat-api/image-jobs/:jobId
 
 这些主要给 `/chat/` 网页使用。生图时网页调用 `/chat-api/image-jobs` 创建任务，然后每 2 秒轮询 `/chat-api/image-jobs/:jobId`。
 
-### 对外异步生图接口
+### 对外异步生图/修改图片接口
 
 ```text
 POST /v1/images/generations
@@ -53,6 +53,12 @@ GET  /v1/image-jobs/:jobId
 ```
 
 这组接口是给外部系统调用的 OpenAI 风格异步接口。它不直接返回最终图片，而是先返回 job，再轮询 job 状态。
+
+其中：
+
+- `/v1/images/generations`：文生图。
+- `/v1/images/edits`：修改图片、图生图、基于参考图重绘，可上传图片或用 JSON 传图片引用。
+- `/v1/image-jobs/:jobId`：查询文生图和修改图片共用的异步 job 状态。
 
 ### 生成图片访问
 
@@ -159,9 +165,11 @@ curl -sS https://你的域名/v1/image-jobs/imgjob_xxx \
 
 建议外部调用方每 2 到 5 秒轮询一次，不要高频打接口。
 
-## 4. 图生图 / 编辑接口
+## 4. 修改图片 / 图生图接口
 
 `POST /v1/images/edits` 支持两种方式。
+
+这个接口就是对外的“修改图片”入口。创建成功后同样返回 `202 Accepted` 和 `job id`，后续仍然用 `GET /v1/image-jobs/:jobId` 轮询结果。
 
 ### multipart 上传图片
 
@@ -208,6 +216,8 @@ JSON_BODY_LIMIT=32mb
 ```
 
 支持 PNG、JPEG、WEBP、非动画 GIF。动画 GIF 会被拒绝。
+
+注意：`/chat-api/images/variations` 是网页侧保留的同步转发接口，不建议暴露给外部系统作为长耗时入口。对外修改图片统一使用异步 `/v1/images/edits`。
 
 ## 5. Job 生命周期与安全
 
