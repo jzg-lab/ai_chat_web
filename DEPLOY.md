@@ -16,6 +16,8 @@ ciyuan-chat -> 生图直连服务器地址 -> 生图上游服务
 
 生图在本项目内使用异步 job：浏览器只创建任务并轮询状态，真正的生图长请求由 `ciyuan-chat` 后端 worker 直连上游完成。生成图片会临时保存到 Chat 服务器，并通过 `/chat-assets/images/...` 返回给前端。
 
+项目也提供 OpenAI 风格的对外异步接口：外部调用 `POST /v1/images/generations` 创建生图 job，再用 `GET /v1/image-jobs/:jobId` 轮询结果。外部请求继续使用用户自己的 `Authorization: Bearer <user-api-key>`。
+
 ## 2. 环境要求
 
 - Chat 服务器：部署本项目、Nginx、Docker 与 Docker Compose。
@@ -29,6 +31,7 @@ API_BASE_URL=http://<sub2api服务器内网IP或公网IP>:<端口>/v1
 IMAGE_API_BASE_URL=http://<生图直连服务器IP或域名>:<端口>/v1
 UPSTREAM_TIMEOUT_MS=600000
 IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
+IMAGE_JOB_OWNER_SECRET=
 FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
 
@@ -57,6 +60,7 @@ API_BASE_URL=http://10.0.0.20:3000/v1
 IMAGE_API_BASE_URL=http://10.0.0.30:3000/v1
 UPSTREAM_TIMEOUT_MS=600000
 IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
+IMAGE_JOB_OWNER_SECRET=
 ```
 
 在 Chat 服务器验证连通性：
@@ -161,6 +165,19 @@ location /chat/ {
 }
 
 location /chat-api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /v1/ {
     proxy_pass http://127.0.0.1:3000;
     proxy_http_version 1.1;
     proxy_buffering off;

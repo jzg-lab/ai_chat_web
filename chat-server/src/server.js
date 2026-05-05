@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createImageJob, getImageJob, markImageJobDelivered } from "./imageJobs.js";
+import { createImageJob, getExternalImageJob, getImageJob, markImageJobDelivered, toExternalImageJob } from "./imageJobs.js";
 import { generatedImagesDir } from "./imageStorage.js";
 
 const app = express();
@@ -69,6 +69,38 @@ function joinUrl(origin, endpoint) {
 
 function isOpenAIImageModel(value) {
   return String(value || "").toLowerCase().startsWith("gpt-image");
+}
+
+function imageGenerationBody(body) {
+  const next = { ...body };
+  if (imageModel && !next.model) {
+    next.model = imageModel;
+  }
+  if (!next.response_format || (isOpenAIImageModel(next.model) && next.response_format === "url")) {
+    next.response_format = "b64_json";
+  }
+  return next;
+}
+
+function requestOrigin(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "http";
+  const host = req.get("x-forwarded-host") || req.get("host");
+  return host ? `${proto}://${host}` : "";
+}
+
+function absoluteUrl(req, value) {
+  if (!value || /^https?:\/\//i.test(value) || value.startsWith("data:")) {
+    return value;
+  }
+  const origin = requestOrigin(req);
+  return origin ? `${origin}${value.startsWith("/") ? value : `/${value}`}` : value;
+}
+
+function withAbsoluteImageUrls(req, payload) {
+  if (payload?.result?.data) {
+    payload.result.data = payload.result.data.map((item) => (item.url ? { ...item, url: absoluteUrl(req, item.url) } : item));
+  }
+  return payload;
 }
 
 function publicHeaders(headers) {
@@ -193,13 +225,7 @@ app.post("/chat-api/image-jobs", (req, res) => {
     return;
   }
 
-  const body = { ...req.body };
-  if (imageModel && !body.model) {
-    body.model = imageModel;
-  }
-  if (!body.response_format || (isOpenAIImageModel(body.model) && body.response_format === "url")) {
-    body.response_format = "b64_json";
-  }
+  const body = imageGenerationBody(req.body);
 
   const job = createImageJob(body, authorization, {
     upstreamUrl: joinUrl(imageApiBaseUrl, imageGenerationEndpoint),
@@ -207,6 +233,21 @@ app.post("/chat-api/image-jobs", (req, res) => {
   });
 
   res.status(202).json(job);
+});
+
+app.post("/v1/images/generations", (req, res) => {
+  const authorization = getAuthorization(req);
+  if (!authorization) {
+    res.status(401).json({ error: { message: "Missing Authorization bearer token." } });
+    return;
+  }
+
+  const job = createImageJob(imageGenerationBody(req.body), authorization, {
+    upstreamUrl: joinUrl(imageApiBaseUrl, imageGenerationEndpoint),
+    upstreamTimeoutMs
+  });
+
+  res.status(202).json(toExternalImageJob(job));
 });
 
 app.get("/chat-api/image-jobs/:jobId", (req, res) => {
@@ -217,6 +258,25 @@ app.get("/chat-api/image-jobs/:jobId", (req, res) => {
   }
 
   res.json(job);
+  if (job.status === "succeeded") {
+    markImageJobDelivered(req.params.jobId, imageJobDeliveryCleanupMs);
+  }
+});
+
+app.get("/v1/image-jobs/:jobId", (req, res) => {
+  const authorization = getAuthorization(req);
+  if (!authorization) {
+    res.status(401).json({ error: { message: "Missing Authorization bearer token." } });
+    return;
+  }
+
+  const job = getExternalImageJob(req.params.jobId, authorization);
+  if (!job) {
+    res.status(404).json({ error: { message: "Image job not found." } });
+    return;
+  }
+
+  res.json(withAbsoluteImageUrls(req, job));
   if (job.status === "succeeded") {
     markImageJobDelivered(req.params.jobId, imageJobDeliveryCleanupMs);
   }

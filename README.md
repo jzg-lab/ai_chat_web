@@ -41,6 +41,7 @@ IMAGE_MODEL=
 PORT=3000
 UPSTREAM_TIMEOUT_MS=600000
 IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
+IMAGE_JOB_OWNER_SECRET=
 ```
 
 Nginx 反代参考：`deploy/nginx-ciyuan-chat.conf`。如果是两台服务器并且重视安全边界，先看 `SECURE_DEPLOY.md`。
@@ -62,6 +63,8 @@ https://ciyuan.fast/chat
 - `POST /chat-api/images/generations` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_GENERATIONS_ENDPOINT}`
 - `POST /chat-api/images/edits` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_EDITS_ENDPOINT}`
 - `POST /chat-api/images/variations` 转发到 `${IMAGE_API_BASE_URL}${IMAGE_VARIATIONS_ENDPOINT}`
+- `POST /v1/images/generations` OpenAI 风格对外异步生图接口，返回 `202` job
+- `GET /v1/image-jobs/:jobId` OpenAI 风格对外 job 查询接口
 - `GET /chat-api/health` 健康检查
 
 前端请求代理时带：
@@ -81,6 +84,57 @@ Authorization: Bearer <user-api-key>
 5. 成功后返回 `/chat-assets/images/...` 图片 URL。
 
 `gpt-image-*` 系列只使用 `b64_json` 返回格式；DALL-E 系列仍可使用 `url` 或 `b64_json`。生成图片保存在 `chat-server/storage/generated-images`，任务成功状态首次回传后默认 120 秒清理本地图片和 job，可用 `IMAGE_JOB_DELIVERY_CLEANUP_MS` 调整。
+
+## 对外异步接口
+
+对外接口保持 OpenAI images 请求风格，但生图全部异步：
+
+```http
+POST /v1/images/generations
+Authorization: Bearer <user-api-key>
+Content-Type: application/json
+```
+
+请求体继续使用 OpenAI images 字段，例如 `model`、`prompt`、`size`、`quality`、`background`、`output_format`、`response_format`、`n`。接口立即返回：
+
+```json
+{
+  "id": "imgjob_xxx",
+  "object": "image_generation.job",
+  "status": "queued",
+  "created": 1777911944,
+  "poll_url": "/v1/image-jobs/imgjob_xxx"
+}
+```
+
+查询时必须继续携带同一个 Bearer Key：
+
+```http
+GET /v1/image-jobs/imgjob_xxx
+Authorization: Bearer <user-api-key>
+```
+
+成功后返回外层 job 状态，内层 `result` 尽量保持 OpenAI images response：
+
+```json
+{
+  "id": "imgjob_xxx",
+  "object": "image_generation.job",
+  "status": "succeeded",
+  "created": 1777911944,
+  "completed_at": 1777911978,
+  "result": {
+    "created": 1777911978,
+    "data": [
+      {
+        "url": "https://your-domain/chat-assets/images/xxx.png"
+      }
+    ]
+  }
+}
+```
+
+服务端只在 job 运行期间短暂保留明文 Authorization，完成或失败后立即删除。查询归属使用 HMAC 哈希校验；`IMAGE_JOB_OWNER_SECRET` 可选配置，不填时进程启动会自动生成临时 secret。
 
 ## 已覆盖能力
 

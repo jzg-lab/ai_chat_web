@@ -3,6 +3,7 @@ import { deleteGeneratedImage, downloadAndSaveImage, saveBase64Image } from "./i
 
 const JOB_TTL_MS = 30 * 60 * 1000;
 const BODY_PREVIEW_LIMIT = 300;
+const ownerHashSecret = process.env.IMAGE_JOB_OWNER_SECRET || crypto.randomBytes(32).toString("hex");
 const jobs = new Map();
 
 function publicJob(job) {
@@ -23,6 +24,32 @@ function publicJob(job) {
   }
   if (job.status === "succeeded") {
     payload.images = job.images;
+  }
+
+  return payload;
+}
+
+function externalJob(job) {
+  const payload = {
+    id: job.id,
+    object: "image_generation.job",
+    status: job.status,
+    created: Math.floor(job.createdAt / 1000),
+    poll_url: `/v1/image-jobs/${job.id}`
+  };
+
+  if (job.status === "succeeded") {
+    const completedAt = job.completedAt || job.updatedAt;
+    payload.completed_at = Math.floor(completedAt / 1000);
+    payload.result = {
+      created: Math.floor(completedAt / 1000),
+      data: job.images.map((url) => ({ url }))
+    };
+  }
+  if (job.status === "failed") {
+    payload.error = {
+      message: job.error || "Image job failed."
+    };
   }
 
   return payload;
@@ -51,6 +78,17 @@ function authorizationDebug(authorization) {
     authorization_starts_with_bearer: startsWithBearer,
     authorization_preview: token ? `${token.slice(0, 6)}...${token.slice(-4)}` : ""
   };
+}
+
+function ownerHash(authorization) {
+  return crypto.createHmac("sha256", ownerHashSecret).update(authorization).digest("hex");
+}
+
+function ownerMatches(job, authorization) {
+  if (!job.ownerHash || !authorization) return false;
+  const expected = Buffer.from(job.ownerHash, "hex");
+  const actual = Buffer.from(ownerHash(authorization), "hex");
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
 async function cleanupJob(job) {
@@ -182,6 +220,7 @@ async function runImageJob(job, options) {
 
     job.status = "succeeded";
     job.images = images;
+    job.completedAt = Date.now();
     job.updatedAt = Date.now();
     logJob(job, "succeeded", { image_count: images.length, warnings: job.warnings.length });
   } catch (error) {
@@ -204,12 +243,13 @@ async function runImageJob(job, options) {
 
 export function createImageJob(body, authorization, options) {
   const job = {
-    id: crypto.randomUUID(),
+    id: `imgjob_${crypto.randomUUID().replace(/-/g, "")}`,
     status: "queued",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     body,
     authorization,
+    ownerHash: ownerHash(authorization),
     images: [],
     error: "",
     upstreamStatus: null,
@@ -229,6 +269,24 @@ export function createImageJob(body, authorization, options) {
 export function getImageJob(jobId) {
   const job = jobs.get(jobId);
   return job ? publicJob(job) : null;
+}
+
+export function getExternalImageJob(jobId, authorization) {
+  const job = jobs.get(jobId);
+  if (!job || !ownerMatches(job, authorization)) {
+    return null;
+  }
+  return externalJob(job);
+}
+
+export function toExternalImageJob(job) {
+  return {
+    id: job.job_id,
+    object: "image_generation.job",
+    status: job.status,
+    created: Math.floor(job.created_at / 1000),
+    poll_url: `/v1/image-jobs/${job.job_id}`
+  };
 }
 
 export function markImageJobDelivered(jobId, cleanupDelayMs) {

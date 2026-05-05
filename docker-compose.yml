@@ -23,6 +23,7 @@ services:
       PORT: ${PORT:-3000}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-600000}
       IMAGE_JOB_DELIVERY_CLEANUP_MS: ${IMAGE_JOB_DELIVERY_CLEANUP_MS:-120000}
+      IMAGE_JOB_OWNER_SECRET: ${IMAGE_JOB_OWNER_SECRET:-}
       FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self' https://ciyuan.fast https://*.ciyuan.fast}
     expose:
       - "3000"
