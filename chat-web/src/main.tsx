@@ -62,6 +62,8 @@ type Message = {
   createdAt: number;
   pending?: boolean;
   error?: boolean;
+  imageJobId?: string;
+  imageJobPrompt?: string;
 };
 
 type Conversation = {
@@ -480,6 +482,7 @@ function App() {
   const abortRef = React.useRef<AbortController | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const messagesRef = React.useRef<HTMLElement | null>(null);
+  const pollingImageJobsRef = React.useRef<Set<string>>(new Set());
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = React.useRef(true);
 
@@ -577,6 +580,39 @@ function App() {
     }
   }, [active?.messages, busy]);
 
+  React.useEffect(() => {
+    const pendingJobs = conversations.flatMap((conversation) =>
+      conversation.messages
+        .filter((message) => message.pending && message.imageJobId)
+        .map((message) => ({
+          conversationId: conversation.id,
+          messageId: message.id,
+          jobId: message.imageJobId || "",
+          prompt: message.imageJobPrompt || message.content.split("\n\n")[0] || "Image generation"
+        }))
+    );
+
+    for (const job of pendingJobs) {
+      if (!job.jobId || pollingImageJobsRef.current.has(job.jobId)) continue;
+      pollingImageJobsRef.current.add(job.jobId);
+      const controller = new AbortController();
+      pollImageJob(job.conversationId, job.messageId, job.jobId, job.prompt, controller.signal)
+        .catch((error) => {
+          if ((error as Error).name === "AbortError") return;
+          patchMessage(job.conversationId, job.messageId, {
+            pending: false,
+            error: true,
+            imageJobId: undefined,
+            imageJobPrompt: undefined,
+            content: (error as Error).message || "Image generation failed."
+          });
+        })
+        .finally(() => {
+          pollingImageJobsRef.current.delete(job.jobId);
+        });
+    }
+  }, [conversations]);
+
   function updateStickToBottom() {
     const node = messagesRef.current;
     if (!node) return;
@@ -633,6 +669,49 @@ function App() {
       messages: conversation.messages.map((message) => (message.id === messageId ? { ...message, ...patch } : message)),
       updatedAt: Date.now()
     }));
+  }
+
+  async function pollImageJob(conversationId: string, assistantId: string, jobId: string, prompt: string, signal: AbortSignal) {
+    while (true) {
+      await wait(2000, signal);
+      const statusResponse = await fetch(`/chat-api/image-jobs/${encodeURIComponent(jobId)}`, {
+        signal
+      });
+
+      if (!statusResponse.ok) {
+        throw new Error(await readError(statusResponse));
+      }
+
+      const job = (await statusResponse.json()) as { status?: ImageJobStatus; images?: string[]; error?: string };
+      if (job.status === "queued" || job.status === "running") {
+        patchMessage(conversationId, assistantId, {
+          content: `${prompt}\n\nGenerating image...`,
+          pending: true,
+          imageJobId: jobId,
+          imageJobPrompt: prompt
+        });
+        continue;
+      }
+
+      if (job.status === "succeeded") {
+        const imageUrls = Array.isArray(job.images) ? job.images.filter(Boolean) : extractImageUrls(job);
+        if (!imageUrls.length) throw new Error("Image job completed without a displayable image URL.");
+        patchMessage(conversationId, assistantId, {
+          content: `${prompt}\n\nGenerated ${imageUrls.length} image${imageUrls.length > 1 ? "s" : ""}. Please save it soon; temporary images are cleaned up later.`,
+          imageUrls,
+          pending: false,
+          imageJobId: undefined,
+          imageJobPrompt: undefined
+        });
+        return;
+      }
+
+      if (job.status === "failed") {
+        throw new Error(job.error || "Image generation failed.");
+      }
+
+      throw new Error("Image job returned an unknown status.");
+    }
   }
 
   function conversationMessages(conversationId: string, currentUserContent: ChatMessageContent): ChatMessagePayload[] {
@@ -829,38 +908,17 @@ function App() {
     const created = (await response.json()) as { job_id?: string; status?: ImageJobStatus };
     if (!created.job_id) throw new Error("生图任务创建失败。");
 
-    while (true) {
-      await wait(2000, controller.signal);
-      const statusResponse = await fetch(`/chat-api/image-jobs/${encodeURIComponent(created.job_id)}`, {
-        signal: controller.signal
-      });
-
-      if (!statusResponse.ok) {
-        throw new Error(await readError(statusResponse));
-      }
-
-      const job = (await statusResponse.json()) as { status?: ImageJobStatus; images?: string[]; error?: string };
-      if (job.status === "queued" || job.status === "running") {
-        patchMessage(conversationId, assistantId, { content: `${prompt}\n\n正在生成图片...`, pending: true });
-        continue;
-      }
-
-      if (job.status === "succeeded") {
-        const imageUrls = Array.isArray(job.images) ? job.images.filter(Boolean) : extractImageUrls(job);
-        if (!imageUrls.length) throw new Error("生图任务完成，但未返回可显示的图片地址。");
-        patchMessage(conversationId, assistantId, {
-          content: `${prompt}\n\n已生成 ${imageUrls.length} 张图片。请及时保存，图片约 1 小时后会自动删除。`,
-          imageUrls,
-          pending: false
-        });
-        return;
-      }
-
-      if (job.status === "failed") {
-        throw new Error(job.error || "生图任务失败。");
-      }
-
-      throw new Error("生图任务返回了未知状态。");
+    pollingImageJobsRef.current.add(created.job_id);
+    patchMessage(conversationId, assistantId, {
+      content: `${prompt}\n\nGenerating image...`,
+      pending: true,
+      imageJobId: created.job_id,
+      imageJobPrompt: prompt
+    });
+    try {
+      await pollImageJob(conversationId, assistantId, created.job_id, prompt, controller.signal);
+    } finally {
+      pollingImageJobsRef.current.delete(created.job_id);
     }
   }
 
