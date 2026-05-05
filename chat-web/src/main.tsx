@@ -6,6 +6,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  FileText,
   Image,
   KeyRound,
   Menu,
@@ -96,6 +97,8 @@ const IMAGE_FORMATS: ImageResponseFormat[] = ["url", "b64_json"];
 const IMAGE_COUNTS = Array.from({ length: 10 }, (_item, index) => index + 1);
 const MAX_ATTACHMENTS = 16;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_TEXT_ATTACHMENT_BYTES = 1024 * 1024;
+const MAX_TEXT_ATTACHMENT_CHARS = 80000;
 const DEFAULT_IMAGE_PARAMS: ImageParams = {
   model: "gpt-image-2",
   size: "1024x1024",
@@ -107,9 +110,63 @@ const DEFAULT_IMAGE_PARAMS: ImageParams = {
 type Attachment = {
   id: string;
   file: File;
+  kind: "image" | "text";
   name: string;
-  url: string;
+  url?: string;
 };
+
+const TEXT_FILE_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "json",
+  "jsonl",
+  "xml",
+  "yaml",
+  "yml",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "py",
+  "java",
+  "c",
+  "cc",
+  "cpp",
+  "h",
+  "hpp",
+  "cs",
+  "go",
+  "rs",
+  "php",
+  "rb",
+  "swift",
+  "kt",
+  "kts",
+  "sql",
+  "html",
+  "css",
+  "scss",
+  "less",
+  "sh",
+  "bash",
+  "zsh",
+  "ps1",
+  "bat",
+  "cmd",
+  "toml",
+  "ini",
+  "env",
+  "log",
+  "vue",
+  "svelte"
+]);
+const IMAGE_FILE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+const TEXT_FILE_ACCEPT = Array.from(TEXT_FILE_EXTENSIONS)
+  .map((extension) => `.${extension}`)
+  .join(",");
 
 function isOpenAIImageModel(value: string) {
   return value.toLowerCase().startsWith("gpt-image");
@@ -265,6 +322,32 @@ function fileToDataUrl(file: File) {
     reader.onerror = () => reject(reader.error || new Error("Failed to read image file."));
     reader.readAsDataURL(file);
   });
+}
+
+function fileExtension(name: string) {
+  const extension = name.toLowerCase().split(".").pop() || "";
+  return extension === name.toLowerCase() ? "" : extension;
+}
+
+function isTextAttachment(file: File) {
+  const type = file.type.toLowerCase();
+  if (type.startsWith("text/")) return true;
+  if (["application/json", "application/x-ndjson", "application/xml", "application/yaml"].includes(type)) return true;
+  const extension = fileExtension(file.name);
+  return TEXT_FILE_EXTENSIONS.has(extension) || file.name.toLowerCase() === "dockerfile";
+}
+
+async function readTextAttachment(attachment: Attachment) {
+  const text = await attachment.file.text();
+  const clipped = text.length > MAX_TEXT_ATTACHMENT_CHARS;
+  const content = clipped ? text.slice(0, MAX_TEXT_ATTACHMENT_CHARS) : text;
+  return [
+    `--- file: ${attachment.name}`,
+    `mime: ${attachment.file.type || "text/plain"}`,
+    `size: ${attachment.file.size} bytes${clipped ? `, truncated to ${MAX_TEXT_ATTACHMENT_CHARS} chars` : ""}`,
+    "---",
+    content
+  ].join("\n");
 }
 
 function imageUrlsForMessage(message: Message) {
@@ -504,21 +587,27 @@ function App() {
     }));
   }
 
-  async function sendChat(conversationId: string, userText: string, assistantId: string, imageAttachments: Attachment[]) {
+  async function sendChat(conversationId: string, userText: string, assistantId: string, selectedAttachments: Attachment[]) {
     const controller = new AbortController();
     abortRef.current = controller;
     const currentMessages =
       conversations.find((conversation) => conversation.id === conversationId)?.messages.filter((message) => !message.error) ?? [];
+    const imageAttachments = selectedAttachments.filter((attachment) => attachment.kind === "image");
+    const textAttachments = selectedAttachments.filter((attachment) => attachment.kind === "text");
+    const fileText = textAttachments.length ? (await Promise.all(textAttachments.map(readTextAttachment))).join("\n\n") : "";
+    const textContent = [userText || (imageAttachments.length ? "Please analyze the attached image." : "Please analyze the attached files."), fileText]
+      .filter(Boolean)
+      .join("\n\nAttached files:\n");
     const currentUserContent =
       imageAttachments.length > 0
         ? [
-            { type: "text", text: userText || "Please analyze the attached image." },
+            { type: "text", text: textContent },
             ...(await Promise.all(imageAttachments.map(async (attachment) => ({
               type: "image_url",
               image_url: { url: await fileToDataUrl(attachment.file) }
             }))))
           ]
-        : userText;
+        : textContent;
 
     const response = await fetch("/chat-api/chat/completions", {
       method: "POST",
@@ -679,11 +768,21 @@ function App() {
     setBusy(true);
     setNotice("");
 
+    const fileNames = selectedAttachments.filter((attachment) => attachment.kind === "text").map((attachment) => attachment.name);
+    const displayContent = [text, fileNames.length ? `Attached files: ${fileNames.join(", ")}` : ""].filter(Boolean).join("\n\n");
+    const imageUrls = selectedAttachments
+      .filter((attachment) => attachment.kind === "image" && attachment.url)
+      .map((attachment) => attachment.url as string);
+
     appendMessage(conversationId, {
       id: newId(),
       role: "user",
-      content: text || "Attached image",
-      imageUrls: selectedAttachments.map((attachment) => attachment.url),
+      content:
+        displayContent ||
+        (selectedAttachments.some((attachment) => attachment.kind === "image")
+          ? "Attached image"
+          : `Attached ${selectedAttachments.length} file${selectedAttachments.length > 1 ? "s" : ""}`),
+      imageUrls,
       createdAt: Date.now()
     });
     appendMessage(conversationId, {
@@ -719,21 +818,43 @@ function App() {
 
   function addAttachmentFiles(files: File[]) {
     if (!files.length) return;
-    const nextFiles = files;
-    const imageFiles = nextFiles.filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHMENT_BYTES);
-    if (imageFiles.length !== nextFiles.length) {
-      setNotice("Only image files up to 20MB are supported.");
+    const rejected: string[] = [];
+    const acceptedFiles = files
+      .map((file) => {
+        if (file.type.startsWith("image/")) {
+          if (file.size <= MAX_ATTACHMENT_BYTES) return { file, kind: "image" as const };
+          rejected.push(`${file.name || "image"} exceeds 20MB`);
+          return null;
+        }
+        if (mode !== "chat") {
+          rejected.push(`${file.name || "file"} is not an image`);
+          return null;
+        }
+        if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
+          rejected.push(`${file.name || "file"} exceeds 1MB`);
+          return null;
+        }
+        if (!isTextAttachment(file)) {
+          rejected.push(`${file.name || "file"} is not a supported text file`);
+          return null;
+        }
+        return { file, kind: "text" as const };
+      })
+      .filter((item): item is { file: File; kind: "image" | "text" } => Boolean(item));
+    if (rejected.length) {
+      setNotice(`Some files were skipped: ${rejected.slice(0, 3).join("; ")}${rejected.length > 3 ? "..." : ""}`);
     }
     setAttachments((current) => {
       const available = Math.max(MAX_ATTACHMENTS - current.length, 0);
-      const accepted = imageFiles.slice(0, available).map((file) => ({
+      const accepted = acceptedFiles.slice(0, available).map(({ file, kind }) => ({
         id: newId(),
+        kind,
         file,
-        name: file.name || "image",
-        url: URL.createObjectURL(file)
+        name: file.name || (kind === "image" ? "image" : "file"),
+        url: kind === "image" ? URL.createObjectURL(file) : undefined
       }));
-      if (imageFiles.length > available) {
-        setNotice(`Upload at most ${MAX_ATTACHMENTS} images.`);
+      if (acceptedFiles.length > available) {
+        setNotice(`Upload at most ${MAX_ATTACHMENTS} attachments.`);
       }
       return [...current, ...accepted];
     });
@@ -749,26 +870,26 @@ function App() {
   function pasteImageAttachments(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     if (busy) return;
     const files = Array.from(event.clipboardData.items)
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .filter((item) => item.kind === "file")
       .map((item, index) => {
         const file = item.getAsFile();
         if (!file) return null;
-        const extension = file.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
-        const name = file.name || `pasted-image-${Date.now()}-${index + 1}.${extension}`;
-        return new File([file], name, { type: file.type || "image/png", lastModified: Date.now() });
+        const extension =
+          fileExtension(file.name) || file.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || (file.type.startsWith("image/") ? "png" : "txt");
+        const name = file.name || `pasted-file-${Date.now()}-${index + 1}.${extension}`;
+        return new File([file], name, { type: file.type || "application/octet-stream", lastModified: Date.now() });
       })
       .filter((file): file is File => Boolean(file));
 
     if (!files.length) return;
     event.preventDefault();
     addAttachmentFiles(files);
-    setNotice(`已粘贴 ${files.length} 张图片。`);
   }
 
   function removeAttachment(id: string) {
     setAttachments((current) => {
       const item = current.find((attachment) => attachment.id === id);
-      if (item) URL.revokeObjectURL(item.url);
+      if (item?.url) URL.revokeObjectURL(item.url);
       return current.filter((attachment) => attachment.id !== id);
     });
   }
@@ -782,6 +903,9 @@ function App() {
       setMode("chat");
       setNotice("当前 Key 只返回 Claude 模型，暂不支持生图。");
       return;
+    }
+    if (nextMode === "image") {
+      setAttachments((current) => current.filter((attachment) => attachment.kind === "image"));
     }
     setMode(nextMode);
   }
@@ -1013,11 +1137,17 @@ function App() {
               <div className="attachment-tray">
                 {attachments.map((attachment) => (
                   <div className="attachment-chip" key={attachment.id}>
-                    <button type="button" onClick={() => setPreviewImage(attachment.url)}>
-                      <img src={attachment.url} alt={attachment.name} />
-                    </button>
+                    {attachment.kind === "image" && attachment.url ? (
+                      <button type="button" onClick={() => setPreviewImage(attachment.url || null)}>
+                        <img src={attachment.url} alt={attachment.name} />
+                      </button>
+                    ) : (
+                      <div className="attachment-file-icon">
+                        <FileText size={18} />
+                      </div>
+                    )}
                     <span>{attachment.name}</span>
-                    <button type="button" className="attachment-remove" onClick={() => removeAttachment(attachment.id)} aria-label="Remove image">
+                    <button type="button" className="attachment-remove" onClick={() => removeAttachment(attachment.id)} aria-label="Remove attachment">
                       <X size={14} />
                     </button>
                   </div>
@@ -1029,14 +1159,14 @@ function App() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
+                accept={mode === "chat" ? `${IMAGE_FILE_ACCEPT},${TEXT_FILE_ACCEPT}` : IMAGE_FILE_ACCEPT}
                 multiple
                 className="file-input"
                 onChange={(event) => addAttachments(event.target.files)}
               />
               <button
                 className="attach-button"
-                title={mode === "chat" ? "Attach image" : "Attach reference image"}
+                title={mode === "chat" ? "Attach file or image" : "Attach reference image"}
                 onClick={() => fileInputRef.current?.click()}
                 disabled={busy || attachments.length >= MAX_ATTACHMENTS}
               >
