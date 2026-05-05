@@ -40,7 +40,7 @@ IMAGE_VARIATIONS_ENDPOINT=/images/variations
 IMAGE_MODEL=
 PORT=3000
 UPSTREAM_TIMEOUT_MS=600000
-IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
+IMAGE_JOB_DELIVERY_CLEANUP_MS=3600000
 IMAGE_JOB_OWNER_SECRET=
 ```
 
@@ -83,7 +83,7 @@ Authorization: Bearer <user-api-key>
 4. 前端每 2 秒轮询 `GET /chat-api/image-jobs/:jobId`。
 5. 成功后返回 `/chat-assets/images/...` 图片 URL。
 
-`gpt-image-*` 系列只使用 `b64_json` 返回格式；DALL-E 系列仍可使用 `url` 或 `b64_json`。生成图片保存在 `chat-server/storage/generated-images`，任务成功状态首次回传后默认 120 秒清理本地图片和 job，可用 `IMAGE_JOB_DELIVERY_CLEANUP_MS` 调整。
+`gpt-image-*` 系列只使用 `b64_json` 返回格式；DALL-E 系列仍可使用 `url` 或 `b64_json`。生成图片保存在 `chat-server/storage/generated-images`，任务成功状态首次回传后默认 1 小时清理本地图片和 job，可用 `IMAGE_JOB_DELIVERY_CLEANUP_MS` 调整。
 
 ## 对外异步接口
 

@@ -105,7 +105,7 @@ vi .env
 API_BASE_URL=http://10.0.0.20:3000/v1
 IMAGE_API_BASE_URL=http://10.0.0.30:3000/v1
 UPSTREAM_TIMEOUT_MS=600000
-IMAGE_JOB_DELIVERY_CLEANUP_MS=120000
+IMAGE_JOB_DELIVERY_CLEANUP_MS=3600000
 IMAGE_JOB_OWNER_SECRET=
 FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 ```
@@ -115,7 +115,7 @@ FRAME_ANCESTORS="'self' https://ciyuan.fast https://*.ciyuan.fast"
 - `API_BASE_URL` 指向 Sub2API 的直连地址。
 - `IMAGE_API_BASE_URL` 指向生图直连地址，不要填 Cloudflare 代理后的域名。
 - `UPSTREAM_TIMEOUT_MS=600000` 是 10 分钟，用于放宽长请求。
-- `IMAGE_JOB_DELIVERY_CLEANUP_MS=120000` 表示异步生图成功状态首次回传后，临时图片和 job 默认 120 秒后清理。
+- `IMAGE_JOB_DELIVERY_CLEANUP_MS=3600000` 表示异步生图成功状态首次回传后，临时图片和 job 默认 1 小时后清理。
 - `IMAGE_JOB_OWNER_SECRET` 用于对外 job 查询的 Key 归属 HMAC 校验；留空时进程启动会生成临时 secret。
 - `FRAME_ANCESTORS` 控制允许哪些站点把 `/chat/` 嵌入 iframe；不需要 iframe 时可以只保留 `"'self'"`。
 

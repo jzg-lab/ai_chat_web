@@ -580,7 +580,7 @@ function App() {
         const imageUrls = Array.isArray(job.images) ? job.images.filter(Boolean) : extractImageUrls(job);
         if (!imageUrls.length) throw new Error("生图任务完成，但未返回可显示的图片地址。");
         patchMessage(conversationId, assistantId, {
-          content: `${prompt}\n\n已生成 ${imageUrls.length} 张图片。`,
+          content: `${prompt}\n\n已生成 ${imageUrls.length} 张图片。请及时保存，图片约 1 小时后会自动删除。`,
           imageUrls,
           pending: false
         });

@@ -22,7 +22,7 @@ const imageEditsEndpoint = process.env.IMAGE_EDITS_ENDPOINT || "/images/edits";
 const imageVariationsEndpoint = process.env.IMAGE_VARIATIONS_ENDPOINT || "/images/variations";
 const imageModel = process.env.IMAGE_MODEL || "";
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS || 600000);
-const imageJobDeliveryCleanupMs = Number(process.env.IMAGE_JOB_DELIVERY_CLEANUP_MS || 120000);
+const imageJobDeliveryCleanupMs = Number(process.env.IMAGE_JOB_DELIVERY_CLEANUP_MS || 3600000);
 const frameAncestors = (process.env.FRAME_ANCESTORS || "'self' https://ciyuan.fast https://*.ciyuan.fast")
   .split(/\s+/)
   .filter(Boolean);
