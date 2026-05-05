@@ -414,6 +414,41 @@ function imageUrlsForMessage(message: Message) {
   return message.imageUrls?.length ? message.imageUrls : message.imageUrl ? [message.imageUrl] : [];
 }
 
+function editableImageFetchUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (parsed.pathname.startsWith("/chat-assets/images/")) {
+      return `${parsed.pathname}${parsed.search}`;
+    }
+  } catch {
+    return url;
+  }
+  return url;
+}
+
+async function fetchEditableImage(url: string) {
+  const fetchUrl = editableImageFetchUrl(url);
+  let response: Response;
+  try {
+    response = await fetch(fetchUrl, { cache: "no-store" });
+  } catch {
+    throw new Error(`无法下载参考图。图片地址不可访问：${url}`);
+  }
+
+  if (response.status === 404) {
+    throw new Error("无法下载参考图。图片文件不存在或已过期，请重新上传图片或用刚生成的图片继续编辑。");
+  }
+  if (!response.ok) {
+    throw new Error(`无法下载参考图。图片服务返回 ${response.status}。`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("无法下载参考图。选中的资源不是图片。");
+  }
+  return blob;
+}
+
 function modelFamily(value: string): ModelFamily {
   const lower = value.toLowerCase();
   if (lower.startsWith("claude") || lower.includes("claude")) return "claude";
@@ -1099,10 +1134,7 @@ function App() {
     }
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Image download failed ${response.status}.`);
-      const blob = await response.blob();
-      if (!blob.type.startsWith("image/")) throw new Error("Selected asset is not an image.");
+      const blob = await fetchEditableImage(url);
       const extension = blob.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
       const file = new File([blob], `edit-reference-${Date.now()}.${extension}`, { type: blob.type || "image/png", lastModified: Date.now() });
       setAttachments((current) => [

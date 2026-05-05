@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/chat-api": "http://localhost:3000"
+      "/chat-api": "http://localhost:3000",
+      "/chat-assets": "http://localhost:3000"
     }
   }
 });
