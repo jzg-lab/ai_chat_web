@@ -717,9 +717,9 @@ function App() {
     abortRef.current?.abort();
   }
 
-  function addAttachments(files: FileList | null) {
-    if (!files?.length) return;
-    const nextFiles = Array.from(files);
+  function addAttachmentFiles(files: File[]) {
+    if (!files.length) return;
+    const nextFiles = files;
     const imageFiles = nextFiles.filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHMENT_BYTES);
     if (imageFiles.length !== nextFiles.length) {
       setNotice("Only image files up to 20MB are supported.");
@@ -740,6 +740,29 @@ function App() {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  }
+
+  function addAttachments(files: FileList | null) {
+    addAttachmentFiles(files ? Array.from(files) : []);
+  }
+
+  function pasteImageAttachments(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (busy) return;
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item, index) => {
+        const file = item.getAsFile();
+        if (!file) return null;
+        const extension = file.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+        const name = file.name || `pasted-image-${Date.now()}-${index + 1}.${extension}`;
+        return new File([file], name, { type: file.type || "image/png", lastModified: Date.now() });
+      })
+      .filter((file): file is File => Boolean(file));
+
+    if (!files.length) return;
+    event.preventDefault();
+    addAttachmentFiles(files);
+    setNotice(`已粘贴 ${files.length} 张图片。`);
   }
 
   function removeAttachment(id: string) {
@@ -1023,6 +1046,7 @@ function App() {
                 value={input}
                 placeholder={mode === "chat" ? "输入消息..." : "描述你想生成的图片..."}
                 onChange={(event) => setInput(event.target.value)}
+                onPaste={pasteImageAttachments}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
