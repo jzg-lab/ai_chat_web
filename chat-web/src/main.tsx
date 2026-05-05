@@ -480,6 +480,7 @@ function App() {
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
+  const busyRef = React.useRef(false);
   const abortRef = React.useRef<AbortController | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const messagesRef = React.useRef<HTMLElement | null>(null);
@@ -926,7 +927,7 @@ function App() {
   async function submit() {
     const text = input.trim();
     const selectedAttachments = attachments;
-    if ((!text && selectedAttachments.length === 0) || busy) return;
+    if ((!text && selectedAttachments.length === 0) || busyRef.current) return;
     if (mode === "image" && !text) {
       setNotice("Image generation needs a prompt.");
       return;
@@ -943,6 +944,7 @@ function App() {
 
     const conversationId = active.id;
     const assistantId = newId();
+    busyRef.current = true;
     setInput("");
     setAttachments([]);
     setBusy(true);
@@ -988,6 +990,7 @@ function App() {
       }
     } finally {
       abortRef.current = null;
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -1118,6 +1121,10 @@ function App() {
   }
 
   function switchMode(nextMode: Mode) {
+    if (busyRef.current) {
+      setNotice("请等待当前响应结束后再切换模式。");
+      return;
+    }
     if (nextMode === "image" && !canUseImages) {
       setMode("chat");
       setNotice("当前 Key 只返回 Claude 模型，暂不支持生图。");
@@ -1215,12 +1222,12 @@ function App() {
           </div>
           <div className="topbar-controls">
             <div className="mode-switch topbar-mode-switch" role="tablist" aria-label="模式">
-              <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")}>
+              <button className={mode === "chat" ? "active" : ""} onClick={() => switchMode("chat")} disabled={busy}>
                 <Bot size={16} />
                 <span>对话</span>
               </button>
               {canUseImages && (
-                <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")}>
+                <button className={mode === "image" ? "active" : ""} onClick={() => switchMode("image")} disabled={busy}>
                   <Image size={16} />
                   <span>生图</span>
                 </button>

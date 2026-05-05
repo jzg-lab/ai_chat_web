@@ -643,6 +643,11 @@ button {
   box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
 }
 
+.mode-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .topbar-mode-switch {
   flex: 0 0 auto;
 }
